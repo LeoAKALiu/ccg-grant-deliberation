@@ -1,0 +1,46 @@
+{
+  "name": "ccg-grant-deliberation",
+  "version": "0.1.0",
+  "description": "Codex plugin for multi-model grant deliberation across Gemini, Claude, and GPT-side Codex personas.",
+  "author": {
+    "name": "Leo",
+    "url": ""
+  },
+  "homepage": "",
+  "repository": "",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "grant",
+    "proposal",
+    "deliberation",
+    "gemini",
+    "claude",
+    "ccg"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks.json",
+  "interface": {
+    "displayName": "CCG 课题论证",
+    "shortDescription": "科技申请书多模型交叉论证与会审汇总",
+    "longDescription": "围绕同一课题组织 Gemini、Claude 与 GPT 侧 Codex 完成立论、两两交叉质询、定向加赛与最终会审汇总，产出可直接写入申报书的总报告。",
+    "developerName": "CCG Contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/fengshao1227/ccg-workflow",
+    "privacyPolicyURL": "https://github.com/fengshao1227/ccg-workflow",
+    "termsOfServiceURL": "https://github.com/fengshao1227/ccg-workflow",
+    "defaultPrompt": [
+      "围绕这个项目申请题目做一轮课题论证并生成会审总报告",
+      "读取这些材料，提炼关键科学问题、工程化难点与最优技术路线",
+      "模拟多模型专家会审，给出申报书可用表述"
+    ],
+    "composerIcon": "./assets/grant-deliberation-icon.svg",
+    "logo": "./assets/grant-deliberation-logo.png",
+    "screenshots": [],
+    "brandColor": "#0F766E"
+  }
+}
