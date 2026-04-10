@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks
+        run: |
+          npm run check
+          npm test
+          node scripts/doctor.mjs
+          node scripts/setup.mjs --skip-install
+          npm run docs:check
+          npm run version:check
+
+      - name: Generate release notes
+        run: node scripts/extract-release-notes.mjs "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+
+      - name: Build release manifest
+        run: |
+          cat > release-manifest.json <<EOF
+          {
+            "version": "${GITHUB_REF_NAME}",
+            "commit": "${GITHUB_SHA}",
+            "channel": "prerelease",
+            "assets": [
+              "examples/output/example-report.md",
+              "examples/output/example-report-research.md"
+            ]
+          }
+          EOF
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
+          files: |
+            release-manifest.json
+            examples/output/example-report.md
+            examples/output/example-report-research.md

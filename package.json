@@ -1,14 +1,16 @@
 {
   "name": "ccg-grant-deliberation",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "license": "MIT",
   "scripts": {
+    "docs:check": "node scripts/check-docs.mjs",
     "doctor": "node scripts/doctor.mjs",
-    "check": "node --check scripts/runtime-environment.mjs && node --check scripts/doctor.mjs && node --check scripts/setup.mjs && node --check scripts/run-grant-deliberation.mjs",
+    "check": "node --check scripts/runtime-environment.mjs && node --check scripts/doctor.mjs && node --check scripts/setup.mjs && node --check scripts/run-grant-deliberation.mjs && node --check scripts/check-docs.mjs && node --check scripts/check-version-sync.mjs && node --check scripts/extract-release-notes.mjs",
     "setup": "node scripts/setup.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "version:check": "node scripts/check-version-sync.mjs"
   },
   "devDependencies": {
     "vitest": "^3.1.1"

@@ -1,6 +1,6 @@
 {
   "name": "ccg-grant-deliberation",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "基于 ccg-workflow 改进的科技申请书专用 Codex 插件，面向关键科学问题、工程化难点与技术路线会审。",
   "author": {
     "name": "Leo",

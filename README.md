@@ -1,10 +1,12 @@
 # CCG Grant Deliberation
 
+[![CI](https://github.com/LeoAKALiu/ccg-grant-deliberation/actions/workflows/ci.yml/badge.svg)](https://github.com/LeoAKALiu/ccg-grant-deliberation/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](/Users/leo/Projects/ccg-grant-deliberation/package.json)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](./package.json)
 [![Status](https://img.shields.io/badge/status-beta-0F766E)](https://github.com/LeoAKALiu/ccg-grant-deliberation)
-[![Templates](https://img.shields.io/badge/templates-research%20%7C%20engineering-2563EB)](/Users/leo/Projects/ccg-grant-deliberation/README.md#templates--模板)
-[![Runtime](https://img.shields.io/badge/runtime-full%20%7C%20partial%20%7C%20minimal-7C3AED)](/Users/leo/Projects/ccg-grant-deliberation/README.md#runtime-modes--运行模式)
+[![Release Target](https://img.shields.io/badge/release-v0.2.0--prerelease-F59E0B)](./CHANGELOG.md)
+[![Templates](https://img.shields.io/badge/templates-research%20%7C%20engineering-2563EB)](#templates--模板)
+[![Runtime](https://img.shields.io/badge/runtime-full%20%7C%20partial%20%7C%20minimal-7C3AED)](#runtime-modes--运行模式)
 
 中文 | [English](#english)
 
@@ -230,18 +232,19 @@ reports/ccg-grant-deliberation/<topic-slug>.md
 
 示例 / Examples:
 
-- [最小示例材料 / Minimal example brief](/Users/leo/Projects/ccg-grant-deliberation/examples/materials/minimal-brief.md)
-- [通用示例报告 / Generic example report](/Users/leo/Projects/ccg-grant-deliberation/examples/output/example-report.md)
-- [研究类模板示例报告 / Research template example](/Users/leo/Projects/ccg-grant-deliberation/examples/output/example-report-research.md)
+- [最小示例材料 / Minimal example brief](./examples/materials/minimal-brief.md)
+- [通用示例报告 / Generic example report](./examples/output/example-report.md)
+- [研究类模板示例报告 / Research template example](./examples/output/example-report-research.md)
 
 ## Release | 发布状态
 
 当前仓库状态 / Current repository status:
 
-- 当前代码版本：`0.1.0`
+- 当前代码版本：`0.2.0`
 - 当前定位：`beta`
-- 当前发布方式：源码仓库 + 本地插件目录
-- 当前事实：尚未创建正式 GitHub Release tag
+- 当前发布方式：Git tag 驱动的 GitHub prerelease
+- 当前规则来源：[`CHANGELOG.md`](./CHANGELOG.md) + [`docs/releasing.md`](./docs/releasing.md)
+- 当前事实：首个正式 GitHub Release 目标为 `v0.2.0` prerelease
 
 Release policy:
 
@@ -251,7 +254,7 @@ Release policy:
 
 下一个合理发布目标 / Next sensible release target:
 
-- `v0.2.0`: 更稳的 research / engineering 模板输出与真实 live smoke 验证
+- `v0.2.0`: 第一版正式 GitHub prerelease，包含 CI、版本同步、changelog 驱动 release notes 与 tag 驱动发布
 
 ## Roadmap | 路线图
 
@@ -338,8 +341,8 @@ Current limitations:
 
 ## Privacy and Terms | 隐私与条款
 
-- [Privacy Policy](/Users/leo/Projects/ccg-grant-deliberation/docs/privacy.md)
-- [Terms of Use](/Users/leo/Projects/ccg-grant-deliberation/docs/terms.md)
+- [Privacy Policy](./docs/privacy.md)
+- [Terms of Use](./docs/terms.md)
 
 ## Acknowledgements | 致谢
 
