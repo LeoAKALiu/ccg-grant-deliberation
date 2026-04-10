@@ -1,2 +1,6 @@
 #!/bin/sh
-echo "CCG 课题论证已就绪。示例：围绕这个项目申请题目做一轮课题论证并生成会审总报告。"
+if command -v node >/dev/null 2>&1; then
+  node ./scripts/doctor.mjs --hook 2>/dev/null || echo "CCG 课题论证插件已加载。先运行: node scripts/setup.mjs"
+else
+  echo "CCG 课题论证插件已加载。请先安装 Node.js 18+，然后运行: node scripts/setup.mjs"
+fi

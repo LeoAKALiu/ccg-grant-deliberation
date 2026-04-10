@@ -5,7 +5,9 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "check": "node --check scripts/run-grant-deliberation.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "check": "node --check scripts/runtime-environment.mjs && node --check scripts/doctor.mjs && node --check scripts/setup.mjs && node --check scripts/run-grant-deliberation.mjs",
+    "setup": "node scripts/setup.mjs",
     "test": "vitest run"
   },
   "devDependencies": {

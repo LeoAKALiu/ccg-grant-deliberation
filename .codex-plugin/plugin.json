@@ -31,8 +31,8 @@
       "Write"
     ],
     "websiteURL": "https://github.com/LeoAKALiu/ccg-grant-deliberation",
-    "privacyPolicyURL": "https://github.com/LeoAKALiu/ccg-grant-deliberation",
-    "termsOfServiceURL": "https://github.com/LeoAKALiu/ccg-grant-deliberation",
+    "privacyPolicyURL": "https://github.com/LeoAKALiu/ccg-grant-deliberation/blob/main/docs/privacy.md",
+    "termsOfServiceURL": "https://github.com/LeoAKALiu/ccg-grant-deliberation/blob/main/docs/terms.md",
     "defaultPrompt": [
       "围绕这个项目申请题目做一轮课题论证并生成会审总报告",
       "读取这些材料，提炼关键科学问题、工程化难点与最优技术路线",
@@ -40,7 +40,9 @@
     ],
     "composerIcon": "./assets/grant-deliberation-icon.svg",
     "logo": "./assets/grant-deliberation-logo.png",
-    "screenshots": [],
+    "screenshots": [
+      "./assets/grant-deliberation-logo.png"
+    ],
     "brandColor": "#0F766E"
   }
 }

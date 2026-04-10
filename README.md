@@ -61,6 +61,28 @@
 
 ## 使用方式
 
+首次使用建议先跑环境检查：
+
+```bash
+node scripts/doctor.mjs
+```
+
+如需自动安装项目依赖并生成环境摘要：
+
+```bash
+node scripts/setup.mjs
+```
+
+3 分钟快速开始：
+
+```bash
+node scripts/setup.mjs
+node scripts/doctor.mjs
+node scripts/run-grant-deliberation.mjs \
+  --topic "论证某科技项目申请书的关键科学问题、工程化难点和最优技术路线" \
+  --material examples/materials/minimal-brief.md
+```
+
 只给议题：
 
 ```bash
@@ -83,10 +105,32 @@ node scripts/run-grant-deliberation.mjs \
 node scripts/run-grant-deliberation.mjs --help
 ```
 
+## 降级运行规则
+
+本插件现在支持按环境自动降级：
+
+- `full`: `codex + codeagent-wrapper + gemini + claude`
+- `partial`: `codex + codeagent-wrapper + (gemini 或 claude)`
+- `minimal`: `codex + codeagent-wrapper`
+- `blocked`: 缺少 `codex` 或 `codeagent-wrapper`
+
+缺少 `gemini` 或 `claude` 时不会直接失败，但报告会显式写明当前运行级别和实际参与方。
+
+## 示例输入与输出
+
+最小示例材料：
+
+- [examples/materials/minimal-brief.md](/Users/leo/Projects/ccg-grant-deliberation/examples/materials/minimal-brief.md)
+
+示例报告：
+
+- [examples/output/example-report.md](/Users/leo/Projects/ccg-grant-deliberation/examples/output/example-report.md)
+
 ## 开发与测试
 
 ```bash
 npm install
+npm run doctor
 npm run check
 npm test
 ```
@@ -104,6 +148,7 @@ npm test
 
 - Codex 插件 manifest 与 hooks
 - grant deliberation 主运行脚本
+- `setup` / `doctor` 安装与自诊断入口
 - 相关技能入口与测试
 - 品牌资源
 

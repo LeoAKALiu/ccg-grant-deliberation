@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { inspectRuntimeEnvironment } from './runtime-environment.mjs'
 
 export const DEFAULT_LANGUAGE = 'zh-CN'
 export const DEFAULT_FOCUS = [
@@ -97,6 +97,10 @@ Options:
   --focus <a,b,c>        关注维度，默认 key_scientific_questions,engineering_bottlenecks,technical_route
   --output <path>        自定义输出路径
   --help                 显示帮助
+
+Environment:
+  node scripts/doctor.mjs
+  node scripts/setup.mjs
 `)
 }
 
@@ -118,12 +122,18 @@ export function resolveOutputPath(cwd, topic, outputPath) {
   return path.join(cwd, 'reports', 'ccg-grant-deliberation', `${slugifyTopic(topic)}.md`)
 }
 
-export function buildRoundRobinPairs() {
-  return [
-    { id: 'gemini-vs-claude', participants: ['gemini', 'claude'] },
-    { id: 'gemini-vs-gpt', participants: ['gemini', 'gpt'] },
-    { id: 'claude-vs-gpt', participants: ['claude', 'gpt'] },
-  ]
+export function buildRoundRobinPairs(participants = ['gemini', 'claude', 'gpt']) {
+  const normalized = [...new Set((participants || []).filter(Boolean))]
+  const pairs = []
+  for (let i = 0; i < normalized.length; i++) {
+    for (let j = i + 1; j < normalized.length; j++) {
+      pairs.push({
+        id: `${normalized[i]}-vs-${normalized[j]}`,
+        participants: [normalized[i], normalized[j]],
+      })
+    }
+  }
+  return pairs
 }
 
 export function parseCliArgs(argv) {
@@ -260,16 +270,25 @@ export function shouldEscalatePair(scorecard, threshold = ESCALATION_THRESHOLD) 
   return conflict >= threshold || unresolved >= threshold || scorecard?.decision_status === 'needs_addendum'
 }
 
-export function renderMarkdownReport({ dossier, finalSummary, pairResults, escalatedPairs, outputPath }) {
+export function renderMarkdownReport({ dossier, finalSummary, pairResults, escalatedPairs, outputPath, runtimeContext }) {
   const keyQuestions = Array.isArray(finalSummary.key_scientific_questions) ? finalSummary.key_scientific_questions : []
   const engineering = Array.isArray(finalSummary.engineering_bottlenecks) ? finalSummary.engineering_bottlenecks : []
   const routes = Array.isArray(finalSummary.candidate_route_comparison) ? finalSummary.candidate_route_comparison : []
   const evidenceGaps = Array.isArray(finalSummary.evidence_gaps) ? finalSummary.evidence_gaps : []
   const selectedRoute = finalSummary.selected_route || {}
   const proposalParagraphs = finalSummary.proposal_ready_paragraphs || {}
+  const activeDebaters = Array.isArray(runtimeContext?.activeDebaterLabels) ? runtimeContext.activeDebaterLabels : []
+  const missingOptional = Array.isArray(runtimeContext?.missingOptional) ? runtimeContext.missingOptional : []
 
   const lines = [
     `# CCG 课题论证报告：${dossier.topic}`,
+    '',
+    '## 运行环境声明',
+    `- 运行状态：${runtimeContext?.status || 'unknown'}`,
+    `- 运行级别：${runtimeContext?.runMode || 'unknown'}`,
+    `- 实际参与方：${activeDebaters.length > 0 ? activeDebaters.join('、') : '未识别'}`,
+    `- 可用命令：${runtimeContext?.commands ? Object.entries(runtimeContext.commands).filter(([, item]) => item.available).map(([name]) => name).join('、') : '未识别'}`,
+    `- 缺失可选 provider：${missingOptional.length > 0 ? missingOptional.join('、') : '无'}`,
     '',
     '## 议题归一化 Brief',
     finalSummary.normalized_brief || dossier.normalizedBrief,
@@ -360,9 +379,15 @@ export function renderMarkdownReport({ dossier, finalSummary, pairResults, escal
   lines.push(proposalParagraphs.technical_route || '暂无可用表述')
 
   lines.push('', '## 会审记录摘要')
-  Object.values(pairResults).forEach((pair) => {
-    lines.push(`- ${pair.score.pair}: conflict=${pair.score.conflict_score}, unresolved=${pair.score.unresolved_degree}, status=${pair.score.decision_status}`)
-  })
+  const summarizedPairs = Object.values(pairResults)
+  if (summarizedPairs.length === 0) {
+    lines.push('- 本次运行未进入 pair 会审；当前结果基于降级模式直接汇总。')
+  }
+  else {
+    summarizedPairs.forEach((pair) => {
+      lines.push(`- ${pair.score.pair}: conflict=${pair.score.conflict_score}, unresolved=${pair.score.unresolved_degree}, status=${pair.score.decision_status}`)
+    })
+  }
 
   if (escalatedPairs.length > 0) {
     lines.push('', `## 加赛 Pair`, escalatedPairs.map(pair => `- ${pair}`).join('\n'))
@@ -378,48 +403,6 @@ export function renderMarkdownReport({ dossier, finalSummary, pairResults, escal
 
   return `${lines.join('\n')}\n`
 }
-
-function searchPathForCommand(commandName) {
-  const extList = process.platform === 'win32'
-    ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)
-    : ['']
-
-  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
-    if (!dir) continue
-    for (const ext of extList) {
-      const candidate = path.join(dir, process.platform === 'win32' && ext ? `${commandName}${ext}` : commandName)
-      if (existsSync(candidate)) {
-        return candidate
-      }
-    }
-  }
-  return ''
-}
-
-function resolveWrapperPath() {
-  const configured = process.env.CCG_CODEAGENT_WRAPPER
-  if (configured && existsSync(configured)) {
-    return configured
-  }
-
-  const homeCandidate = path.join(os.homedir(), '.claude', 'bin', process.platform === 'win32' ? 'codeagent-wrapper.exe' : 'codeagent-wrapper')
-  if (existsSync(homeCandidate)) {
-    return homeCandidate
-  }
-
-  return searchPathForCommand('codeagent-wrapper')
-}
-
-export function findMissingBinaries() {
-  const wrapperPath = resolveWrapperPath()
-  const missing = []
-  if (!wrapperPath) missing.push('codeagent-wrapper')
-  if (!searchPathForCommand('codex')) missing.push('codex')
-  if (!searchPathForCommand('gemini')) missing.push('gemini')
-  if (!searchPathForCommand('claude')) missing.push('claude')
-  return { wrapperPath, missing }
-}
-
 async function fileLooksReadable(filePath) {
   try {
     await access(filePath)
@@ -641,18 +624,18 @@ export function buildFinalSynthesisTask(dossier, openings, pairResults, escalate
   }
 }
 
-function createStatusTracker(outputPath) {
+function createStatusTracker(outputPath, activeActorIds = ['gemini', 'claude', 'gpt']) {
   const state = {
     phase: '初始化',
     actors: {
-      gemini: 'idle',
-      claude: 'idle',
-      gpt: 'idle',
+      gemini: activeActorIds.includes('gemini') ? 'idle' : 'unavailable',
+      claude: activeActorIds.includes('claude') ? 'idle' : 'unavailable',
+      gpt: activeActorIds.includes('gpt') ? 'idle' : 'unavailable',
     },
     latestSignals: {
-      gemini: '暂无',
-      claude: '暂无',
-      gpt: '暂无',
+      gemini: activeActorIds.includes('gemini') ? '暂无' : '未安装',
+      claude: activeActorIds.includes('claude') ? '暂无' : '未安装',
+      gpt: activeActorIds.includes('gpt') ? '暂无' : '必需',
     },
     currentPair: 'none',
     escalatedPairs: [],
@@ -892,13 +875,22 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel }
 async function runGrantDeliberation(options) {
   const cwd = process.cwd()
   const outputPath = resolveOutputPath(cwd, options.topic, options.outputPath)
-  const tracker = createStatusTracker(outputPath)
-  const { wrapperPath, missing } = findMissingBinaries()
+  const runtimeContext = inspectRuntimeEnvironment({ cwd })
+  const tracker = createStatusTracker(outputPath, runtimeContext.activeDebaterIds)
 
-  if (missing.length > 0) {
-    throw new Error(`Missing required binaries: ${missing.join(', ')}\nInstall codex, gemini, claude, and codeagent-wrapper before running grant deliberation.`)
+  if (runtimeContext.status === 'blocked') {
+    const nextSteps = runtimeContext.installAdvice.map(item => `- ${item.advice}`).join('\n')
+    throw new Error([
+      `当前环境无法运行 CCG 课题论证（status=${runtimeContext.status}）。`,
+      '最低运行门槛：codex + codeagent-wrapper',
+      `阻塞项：${runtimeContext.missingRequired.join(', ')}`,
+      nextSteps,
+      '先运行 `node scripts/doctor.mjs` 查看详情。',
+    ].join('\n'))
   }
+  const wrapperPath = runtimeContext.commands['codeagent-wrapper'].path
 
+  tracker.setPhase(`环境检查完成（${runtimeContext.runMode}）`)
   tracker.setPhase('Brief 构建中')
   const dossier = await buildDossier({
     topic: options.topic,
@@ -909,10 +901,11 @@ async function runGrantDeliberation(options) {
   })
 
   const geminiModel = process.env.GEMINI_MODEL?.trim() || ''
+  const activeDebaters = runtimeContext.activeDebaterIds.map(id => DEBATERS[id]).filter(Boolean)
 
   tracker.setPhase('立论轮已启动')
   const openingResults = await Promise.all(
-    Object.values(DEBATERS).map(actor => runWrapperTask({
+    activeDebaters.map(actor => runWrapperTask({
       wrapperPath,
       backend: actor.backend,
       prompt: buildOpeningTask(actor, dossier).prompt,
@@ -925,14 +918,14 @@ async function runGrantDeliberation(options) {
   )
 
   const openings = {}
-  Object.values(DEBATERS).forEach((actor, index) => {
+  activeDebaters.forEach((actor, index) => {
     openings[actor.id] = extractJsonPayload(openingResults[index].message)
   })
   tracker.setPhase('立论轮已完成')
 
   const pairResults = {}
   const escalatedPairs = []
-  const pairs = buildRoundRobinPairs()
+  const pairs = buildRoundRobinPairs(runtimeContext.activeDebaterIds)
 
   for (const pair of pairs) {
     tracker.setPhase(`交叉质询：${pair.id}`)
@@ -1037,7 +1030,7 @@ async function runGrantDeliberation(options) {
 
   const finalResult = await runChairTask({
     wrapperPath,
-    prompt: buildFinalSynthesisTask(dossier, openings, pairResults, escalatedPairs).prompt,
+      prompt: buildFinalSynthesisTask(dossier, openings, pairResults, escalatedPairs).prompt,
     workdir: cwd,
     label: 'Chair final synthesis',
     geminiModel,
@@ -1050,6 +1043,7 @@ async function runGrantDeliberation(options) {
     pairResults,
     escalatedPairs,
     outputPath,
+    runtimeContext,
   })
 
   await mkdir(path.dirname(outputPath), { recursive: true })
@@ -1061,6 +1055,8 @@ async function runGrantDeliberation(options) {
     '',
     '## CCG 课题论证完成',
     `- 总报告: ${outputPath}`,
+    `- 运行级别: ${runtimeContext.runMode}`,
+    `- 实际参与方: ${runtimeContext.activeDebaterLabels.join(', ')}`,
     `- 加赛 Pair: ${escalatedPairs.length > 0 ? escalatedPairs.join(', ') : 'none'}`,
     `- 最优技术路线: ${finalSummary.selected_route?.name || '未明确'}`,
     '',

@@ -37,6 +37,13 @@ describe('grant deliberation helpers', () => {
     ])
   })
 
+  it('builds a reduced pair set when providers are degraded', () => {
+    expect(buildRoundRobinPairs(['gemini', 'gpt'])).toEqual([
+      { id: 'gemini-vs-gpt', participants: ['gemini', 'gpt'] },
+    ])
+    expect(buildRoundRobinPairs(['gpt'])).toEqual([])
+  })
+
   it('uses the default report path when none is provided', () => {
     const cwd = '/tmp/demo'
     expect(resolveOutputPath(cwd, 'Grant Review 2026')).toBe('/tmp/demo/reports/ccg-grant-deliberation/grant-review-2026.md')
@@ -128,8 +135,21 @@ describe('grant deliberation helpers', () => {
       },
       escalatedPairs: [],
       outputPath: '/tmp/report.md',
+      runtimeContext: {
+        status: 'degraded',
+        runMode: 'partial',
+        activeDebaterLabels: ['Gemini', 'GPT(codex)'],
+        missingOptional: ['claude'],
+        commands: {
+          'codeagent-wrapper': { available: true },
+          codex: { available: true },
+          gemini: { available: true },
+        },
+      },
     })
 
+    expect(report).toContain('## 运行环境声明')
+    expect(report).toContain('运行级别：partial')
     expect(report).toContain('## 议题归一化 Brief')
     expect(report).toContain('## 关键科学问题')
     expect(report).toContain('## 工程化卡点/难点')
