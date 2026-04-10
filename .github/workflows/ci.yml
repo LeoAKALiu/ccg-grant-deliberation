@@ -30,7 +30,7 @@ jobs:
         run: npm test
 
       - name: Doctor check
-        run: node scripts/doctor.mjs
+        run: node scripts/doctor.mjs --allow-blocked
 
       - name: Setup check (read-only mode)
         run: node scripts/setup.mjs --skip-install

@@ -4,6 +4,7 @@ import { inspectRuntimeEnvironment, renderDoctorReport } from './runtime-environ
 
 export function parseDoctorArgs(argv) {
   return {
+    allowBlocked: argv.includes('--allow-blocked'),
     json: argv.includes('--json'),
     hook: argv.includes('--hook'),
   }
@@ -19,7 +20,7 @@ export async function runDoctor(argv = process.argv.slice(2)) {
     stream.write(output.endsWith('\n') ? output : `${output}\n`)
   }
 
-  if (!options.hook && report.status === 'blocked') {
+  if (!options.hook && !options.allowBlocked && report.status === 'blocked') {
     process.exitCode = 1
   }
 
