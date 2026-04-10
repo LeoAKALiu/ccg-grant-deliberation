@@ -8,6 +8,7 @@ import {
   buildPairScoreTask,
   buildRoundRobinPairs,
   extractJsonPayload,
+  parseCliArgs,
   parseWrapperOutput,
   renderMarkdownReport,
   resolveOutputPath,
@@ -49,6 +50,13 @@ describe('grant deliberation helpers', () => {
     expect(resolveOutputPath(cwd, 'Grant Review 2026')).toBe('/tmp/demo/reports/ccg-grant-deliberation/grant-review-2026.md')
   })
 
+  it('parses template options and keeps default behavior when absent', () => {
+    expect(parseCliArgs(['--topic', 't', '--template', 'research']).template).toBe('research')
+    expect(parseCliArgs(['--topic', 't', '--template', 'engineering']).template).toBe('engineering')
+    expect(parseCliArgs(['--topic', 't']).template).toBe('')
+    expect(parseCliArgs(['--topic', 't', '--template', 'invalid']).template).toBe('')
+  })
+
   it('extracts JSON from fenced output', () => {
     const parsed = extractJsonPayload('```json\n{"ok":true,"value":1}\n```')
     expect(parsed).toEqual({ ok: true, value: 1 })
@@ -77,12 +85,14 @@ describe('grant deliberation helpers', () => {
     const dossier = await buildDossier({
       topic: '复杂施工现场协同调度',
       materials: [fileA, fileB],
+      template: 'research',
       cwd: tmpDir,
     })
 
     expect(dossier.materials).toHaveLength(2)
     expect(dossier.dossierText).toContain('施工调度研究材料')
     expect(dossier.dossierText).toContain('多智能体协同材料')
+    expect(dossier.normalizedBrief).toContain('章节模板：research')
   })
 
   it('keeps chair tasks on fresh sessions', () => {
@@ -93,7 +103,7 @@ describe('grant deliberation helpers', () => {
       { 'gemini->claude': { strongest_challenges: [] }, 'claude->gemini': { strongest_challenges: [] } },
     )
     const finalTask = buildFinalSynthesisTask(
-      { topic: 't', normalizedBrief: 'b', dossierText: 'dossier' },
+      { topic: 't', normalizedBrief: 'b', dossierText: 'dossier', template: 'research' },
       { gemini: { stance: 'a' }, claude: { stance: 'b' }, gpt: { stance: 'c' } },
       {},
       [],
@@ -103,6 +113,11 @@ describe('grant deliberation helpers', () => {
     expect(pairTask.resumeSession).toBeNull()
     expect(finalTask.backend).toBe('codex')
     expect(finalTask.resumeSession).toBeNull()
+    expect(finalTask.prompt).toContain('章节模板：research')
+    expect(finalTask.prompt).toContain('基金/研究类申请书章节映射')
+    expect(finalTask.prompt).toContain('必须写成完整段落')
+    expect(finalTask.prompt).toContain('章节顺序固定为：研究目标、关键科学问题、研究内容、创新点、技术路线、可行性与风险')
+    expect(finalTask.prompt).toContain('避免夸大')
   })
 
   it('renders a report with all required sections', () => {
@@ -128,6 +143,17 @@ describe('grant deliberation helpers', () => {
           scientific_questions: '科学问题段落',
           engineering_bottlenecks: '工程难点段落',
           technical_route: '技术路线段落',
+        },
+        proposal_section_mapping: {
+          template: 'research',
+          positioning: '适合基金/研究类申请书组织方式',
+          sections: [
+            {
+              title: '研究目标',
+              purpose: '定义项目拟解决的核心目标',
+              content: '围绕施工现场多智能体协同调度建立研究目标。',
+            },
+          ],
         },
       },
       pairResults: {
@@ -155,5 +181,40 @@ describe('grant deliberation helpers', () => {
     expect(report).toContain('## 工程化卡点/难点')
     expect(report).toContain('## 最优技术路线与淘汰理由')
     expect(report).toContain('## 可直接写进申报书的表述')
+    expect(report).toContain('## 申报书章节映射')
+    expect(report).toContain('模板：基金/研究类模板')
+    expect(report).toContain('### 1. 研究目标')
+    expect(report).toContain('用途：定义项目拟解决的核心目标')
+  })
+
+  it('keeps report in generic mode when no template mapping is provided', () => {
+    const report = renderMarkdownReport({
+      dossier: {
+        topic: '复杂施工现场协同调度',
+        normalizedBrief: 'brief',
+        materialWarnings: [],
+      },
+      finalSummary: {
+        normalized_brief: 'brief',
+        key_scientific_questions: [],
+        engineering_bottlenecks: [],
+        candidate_route_comparison: [],
+        selected_route: {},
+        evidence_gaps: [],
+        proposal_ready_paragraphs: {},
+      },
+      pairResults: {},
+      escalatedPairs: [],
+      outputPath: '/tmp/report.md',
+      runtimeContext: {
+        status: 'ready',
+        runMode: 'full',
+        activeDebaterLabels: ['Gemini', 'Claude', 'GPT(codex)'],
+        missingOptional: [],
+        commands: {},
+      },
+    })
+
+    expect(report).not.toContain('## 申报书章节映射')
   })
 })

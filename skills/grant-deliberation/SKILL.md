@@ -21,13 +21,14 @@ description: CCG 课题论证。面向科技申请书/项目申请书，组织 G
 
 ```bash
 node scripts/doctor.mjs
-node scripts/run-grant-deliberation.mjs --topic "<议题>"
+node scripts/run-grant-deliberation.mjs --template research --topic "<议题>"
 ```
 
 带材料路径：
 
 ```bash
 node scripts/run-grant-deliberation.mjs \
+  --template engineering \
   --topic "<议题>" \
   --material <材料路径1> \
   --material <材料路径2>
@@ -42,10 +43,18 @@ node scripts/run-grant-deliberation.mjs \
 5. 如果脚本成功，向用户汇报：
    - 报告路径
    - 当前运行级别（full / partial / minimal）
+   - 当前章节模板（research / engineering / 通用）
    - 最优技术路线
    - 关键科学问题
    - 工程化难点
 6. 如果脚本失败，向用户汇报失败原因、缺失依赖和下一步命令，不要伪造结论
+
+如果用户选择 `--template research`：
+
+- 优先生成可直接写入申请书正文的完整段落
+- 不要把研究类章节写成 bullet list
+- 强化“研究意义 -> 知识空白 -> 研究目标 -> 创新点 -> 技术路线 -> 可行性与风险”的逻辑链
+- 避免夸大式表述和无证据支撑的结论
 
 ## 不要做的事
 

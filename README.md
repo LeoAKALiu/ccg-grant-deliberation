@@ -79,6 +79,7 @@ node scripts/setup.mjs
 node scripts/setup.mjs
 node scripts/doctor.mjs
 node scripts/run-grant-deliberation.mjs \
+  --template research \
   --topic "论证某科技项目申请书的关键科学问题、工程化难点和最优技术路线" \
   --material examples/materials/minimal-brief.md
 ```
@@ -99,6 +100,24 @@ node scripts/run-grant-deliberation.mjs \
   --material /path/to/notes.md
 ```
 
+研究/基金类章节映射：
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --topic "论证某科技项目申请书的关键科学问题、工程化难点和最优技术路线" \
+  --material examples/materials/minimal-brief.md
+```
+
+工程/落地类章节映射：
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template engineering \
+  --topic "论证某科技项目申请书的关键科学问题、工程化难点和最优技术路线" \
+  --material examples/materials/minimal-brief.md
+```
+
 查看帮助：
 
 ```bash
@@ -116,6 +135,17 @@ node scripts/run-grant-deliberation.mjs --help
 
 缺少 `gemini` 或 `claude` 时不会直接失败，但报告会显式写明当前运行级别和实际参与方。
 
+## 申报书章节模板
+
+通过 `--template` 可直接生成章节化申报书建议：
+
+- `research`: 基金/研究类模板，偏研究目标、关键科学问题、研究内容、创新点、技术路线、可行性与风险
+- `engineering`: 工程/落地类模板，偏建设目标、工程难点、实施方案、阶段任务、预期成果、示范应用与风险控制
+
+未传 `--template` 时，默认仍输出当前通用会审报告，不附加章节映射区块。
+
+其中 `research` 模板已经吸收 scientific-writing 风格约束：强调完整段落、问题-空白-目标链路、术语一致、克制表达、创新点建立在知识空白之上，并显式写出可行性与风险。
+
 ## 示例输入与输出
 
 最小示例材料：
@@ -125,6 +155,7 @@ node scripts/run-grant-deliberation.mjs --help
 示例报告：
 
 - [examples/output/example-report.md](/Users/leo/Projects/ccg-grant-deliberation/examples/output/example-report.md)
+- [examples/output/example-report-research.md](/Users/leo/Projects/ccg-grant-deliberation/examples/output/example-report-research.md)
 
 ## 开发与测试
 

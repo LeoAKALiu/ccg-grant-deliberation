@@ -12,6 +12,7 @@ export const DEFAULT_FOCUS = [
   'engineering_bottlenecks',
   'technical_route',
 ]
+export const TEMPLATE_OPTIONS = ['research', 'engineering']
 export const ESCALATION_THRESHOLD = 0.72
 const MAX_MATERIAL_CHARS = 8000
 const MATERIAL_SNIPPET_CHARS = 2000
@@ -95,6 +96,7 @@ Options:
   --materials <a,b,c>    逗号分隔的材料路径列表
   --language <lang>      输出语言，默认 zh-CN
   --focus <a,b,c>        关注维度，默认 key_scientific_questions,engineering_bottlenecks,technical_route
+  --template <name>      章节模板：research | engineering
   --output <path>        自定义输出路径
   --help                 显示帮助
 
@@ -142,6 +144,7 @@ export function parseCliArgs(argv) {
     materials: [],
     language: DEFAULT_LANGUAGE,
     focus: [...DEFAULT_FOCUS],
+    template: '',
     outputPath: '',
     help: false,
   }
@@ -171,6 +174,9 @@ export function parseCliArgs(argv) {
           options.focus = argv[++i].split(',').map(item => item.trim()).filter(Boolean)
         }
         break
+      case '--template':
+        options.template = argv[++i] || ''
+        break
       case '--output':
         options.outputPath = argv[++i] || ''
         break
@@ -190,6 +196,10 @@ export function parseCliArgs(argv) {
 
   if (options.focus.length === 0) {
     options.focus = [...DEFAULT_FOCUS]
+  }
+
+  if (!TEMPLATE_OPTIONS.includes(options.template)) {
+    options.template = ''
   }
 
   return options
@@ -277,6 +287,7 @@ export function renderMarkdownReport({ dossier, finalSummary, pairResults, escal
   const evidenceGaps = Array.isArray(finalSummary.evidence_gaps) ? finalSummary.evidence_gaps : []
   const selectedRoute = finalSummary.selected_route || {}
   const proposalParagraphs = finalSummary.proposal_ready_paragraphs || {}
+  const sectionMapping = finalSummary.proposal_section_mapping || null
   const activeDebaters = Array.isArray(runtimeContext?.activeDebaterLabels) ? runtimeContext.activeDebaterLabels : []
   const missingOptional = Array.isArray(runtimeContext?.missingOptional) ? runtimeContext.missingOptional : []
 
@@ -378,6 +389,22 @@ export function renderMarkdownReport({ dossier, finalSummary, pairResults, escal
   lines.push('', '### 技术路线')
   lines.push(proposalParagraphs.technical_route || '暂无可用表述')
 
+  if (sectionMapping?.template && Array.isArray(sectionMapping.sections) && sectionMapping.sections.length > 0) {
+    const templateLabel = sectionMapping.template === 'engineering' ? '工程类模板' : '基金/研究类模板'
+    lines.push('', '## 申报书章节映射')
+    lines.push(`- 模板：${templateLabel}`)
+    if (sectionMapping.positioning) {
+      lines.push(`- 适配说明：${sectionMapping.positioning}`)
+    }
+    sectionMapping.sections.forEach((section, index) => {
+      lines.push('', `### ${index + 1}. ${section.title || `章节 ${index + 1}`}`)
+      if (section.purpose) {
+        lines.push(`- 用途：${section.purpose}`)
+      }
+      lines.push('', section.content || '暂无建议内容')
+    })
+  }
+
   lines.push('', '## 会审记录摘要')
   const summarizedPairs = Object.values(pairResults)
   if (summarizedPairs.length === 0) {
@@ -437,7 +464,7 @@ async function readMaterialSnapshot(filePath) {
   }
 }
 
-export async function buildDossier({ topic, materials, language = DEFAULT_LANGUAGE, focus = DEFAULT_FOCUS, cwd = process.cwd() }) {
+export async function buildDossier({ topic, materials, language = DEFAULT_LANGUAGE, focus = DEFAULT_FOCUS, template = '', cwd = process.cwd() }) {
   const normalizedMaterials = []
   const materialWarnings = []
 
@@ -454,6 +481,7 @@ export async function buildDossier({ topic, materials, language = DEFAULT_LANGUA
     `议题：${topic}`,
     `输出语言：${language}`,
     `聚焦维度：${(focus || DEFAULT_FOCUS).join('、')}`,
+    `章节模板：${TEMPLATE_OPTIONS.includes(template) ? template : '通用'}`,
     materialWarnings.length > 0 ? `材料警告：${materialWarnings.join('；')}` : '材料警告：无',
   ].join('\n')
 
@@ -470,6 +498,7 @@ export async function buildDossier({ topic, materials, language = DEFAULT_LANGUA
     topic,
     language,
     focus: [...(focus || DEFAULT_FOCUS)],
+    template,
     normalizedBrief,
     materialWarnings,
     materials: normalizedMaterials,
@@ -485,6 +514,21 @@ export async function buildDossier({ topic, materials, language = DEFAULT_LANGUA
 
 function buildJsonInstruction(schema) {
   return `Return ONLY valid JSON. Do not use markdown fences.\nJSON schema:\n${schema}`
+}
+
+function buildResearchTemplateWritingGuidance() {
+  return [
+    '研究类模板写作约束（吸收 scientific-writing 思路）：',
+    '- `proposal_section_mapping.sections[].content` 必须写成完整段落，不要写成 bullet points、条目罗列或口号式短句。',
+    '- 章节顺序固定为：研究目标、关键科学问题、研究内容、创新点、技术路线、可行性与风险。',
+    '- 每个章节先说明为什么重要，再说明项目拟解决什么、如何解决、预期形成什么研究价值。',
+    '- 行文要求精确、克制、客观，避免夸大、避免空泛形容词、避免“国际领先/颠覆性”等无证据支撑表述。',
+    '- 明确区分研究问题、拟采用的方法、预期贡献和当前证据边界，不要把设想写成既成事实。',
+    '- 术语保持前后一致；首次出现的重要概念应在语境中自然定义，不要堆砌缩写。',
+    '- 创新点必须建立在现有不足、知识空白或方法局限之上，不能只重复技术清单。',
+    '- 可行性与风险章节必须诚实写出关键前提、验证路径、阶段性风险与应对措施。',
+    '- 最终内容面向申请书正文，可直接粘贴进章节，不要写“本节建议”或元说明。',
+  ].join('\n')
 }
 
 export function buildOpeningTask(actor, dossier) {
@@ -585,6 +629,13 @@ export function buildPairScoreTask(pair, dossier, openings, rebuttals, addendum 
 }
 
 export function buildFinalSynthesisTask(dossier, openings, pairResults, escalatedPairs) {
+  const templateSchema = `"proposal_section_mapping": {
+    "template": "research|engineering",
+    "positioning": "该模板下的申报定位说明",
+    "sections": [
+      {"title":"章节名","purpose":"该章节用途","content":"可直接写入申报书的内容"}
+    ]
+  },`
   const schema = `{
   "normalized_brief": "归一化 brief",
   "key_scientific_questions": ["关键科学问题"],
@@ -602,8 +653,18 @@ export function buildFinalSynthesisTask(dossier, openings, pairResults, escalate
     "engineering_bottlenecks": "申报书可用段落",
     "technical_route": "申报书可用段落"
   },
+  ${dossier.template ? templateSchema : ''}
   "chair_summary": "主席总结"
 }`
+
+  const templateInstruction = dossier.template === 'research'
+    ? [
+        '本次需额外输出基金/研究类申请书章节映射，重点覆盖研究目标、关键科学问题、研究内容、创新点、技术路线、可行性与风险。',
+        buildResearchTemplateWritingGuidance(),
+      ].join('\n')
+    : dossier.template === 'engineering'
+      ? '本次需额外输出工程/落地类申请书章节映射，重点覆盖建设目标、工程难点、实施方案、阶段任务、预期成果、示范应用与风险控制。'
+      : '本次无需额外输出章节模板映射，只保留通用会审报告结构。'
 
   return {
     backend: CHAIR.backend,
@@ -618,6 +679,8 @@ export function buildFinalSynthesisTask(dossier, openings, pairResults, escalate
       `立论 memo：${JSON.stringify(openings, null, 2)}`,
       `Pair 会审结果：${JSON.stringify(pairResults, null, 2)}`,
       `加赛 pair：${JSON.stringify(escalatedPairs)}`,
+      `章节模板：${dossier.template || '通用'}`,
+      templateInstruction,
       '任务：输出最终会审结论，不要保留模糊折中。必须给出最优路线、淘汰理由、证据缺口和申报书可用表述。',
       buildJsonInstruction(schema),
     ].join('\n'),
@@ -897,6 +960,7 @@ async function runGrantDeliberation(options) {
     materials: options.materials,
     language: options.language,
     focus: options.focus,
+    template: options.template,
     cwd,
   })
 
@@ -1030,7 +1094,7 @@ async function runGrantDeliberation(options) {
 
   const finalResult = await runChairTask({
     wrapperPath,
-      prompt: buildFinalSynthesisTask(dossier, openings, pairResults, escalatedPairs).prompt,
+    prompt: buildFinalSynthesisTask(dossier, openings, pairResults, escalatedPairs).prompt,
     workdir: cwd,
     label: 'Chair final synthesis',
     geminiModel,
