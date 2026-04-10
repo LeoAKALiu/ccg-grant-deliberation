@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "check": "node --check scripts/run-grant-deliberation.mjs && node --check scripts/install-home-plugin.mjs",
+    "check": "node --check scripts/run-grant-deliberation.mjs",
     "test": "vitest run"
   },
   "devDependencies": {

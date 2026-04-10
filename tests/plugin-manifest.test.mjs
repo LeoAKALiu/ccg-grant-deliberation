@@ -21,6 +21,5 @@ describe('ccg-grant-deliberation plugin manifest', () => {
     await expect(access(path.join(pluginRoot, 'hooks.json'))).resolves.toBeUndefined()
     await expect(access(path.join(pluginRoot, 'assets', 'grant-deliberation-icon.svg'))).resolves.toBeUndefined()
     await expect(access(path.join(pluginRoot, 'assets', 'grant-deliberation-logo.png'))).resolves.toBeUndefined()
-    await expect(access(path.join(pluginRoot, 'scripts', 'install-home-plugin.mjs'))).resolves.toBeUndefined()
   })
 })

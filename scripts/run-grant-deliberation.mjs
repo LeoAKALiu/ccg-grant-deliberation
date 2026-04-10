@@ -86,8 +86,8 @@ function printUsage() {
   console.log(`CCG 课题论证
 
 Usage:
-  node plugins/ccg-grant-deliberation/scripts/run-grant-deliberation.mjs --topic "<议题>"
-  node plugins/ccg-grant-deliberation/scripts/run-grant-deliberation.mjs --topic "<议题>" --material path/to/file.md
+  node scripts/run-grant-deliberation.mjs --topic "<议题>"
+  node scripts/run-grant-deliberation.mjs --topic "<议题>" --material path/to/file.md
 
 Options:
   --topic <text>         论证议题
@@ -1099,4 +1099,3 @@ async function main() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   main()
 }
-

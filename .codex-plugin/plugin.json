@@ -1,13 +1,13 @@
 {
   "name": "ccg-grant-deliberation",
   "version": "0.1.0",
-  "description": "Codex plugin for multi-model grant deliberation across Gemini, Claude, and GPT-side Codex personas.",
+  "description": "基于 ccg-workflow 改进的科技申请书专用 Codex 插件，面向关键科学问题、工程化难点与技术路线会审。",
   "author": {
     "name": "Leo",
     "url": ""
   },
-  "homepage": "",
-  "repository": "",
+  "homepage": "https://github.com/LeoAKALiu/ccg-grant-deliberation",
+  "repository": "https://github.com/LeoAKALiu/ccg-grant-deliberation",
   "license": "MIT",
   "keywords": [
     "codex",
@@ -30,9 +30,9 @@
       "Interactive",
       "Write"
     ],
-    "websiteURL": "https://github.com/fengshao1227/ccg-workflow",
-    "privacyPolicyURL": "https://github.com/fengshao1227/ccg-workflow",
-    "termsOfServiceURL": "https://github.com/fengshao1227/ccg-workflow",
+    "websiteURL": "https://github.com/LeoAKALiu/ccg-grant-deliberation",
+    "privacyPolicyURL": "https://github.com/LeoAKALiu/ccg-grant-deliberation",
+    "termsOfServiceURL": "https://github.com/LeoAKALiu/ccg-grant-deliberation",
     "defaultPrompt": [
       "围绕这个项目申请题目做一轮课题论证并生成会审总报告",
       "读取这些材料，提炼关键科学问题、工程化难点与最优技术路线",
