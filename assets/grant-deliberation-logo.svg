@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="320" viewBox="0 0 960 320" fill="none">
+  <defs>
+    <linearGradient id="panel" x1="40" y1="28" x2="280" y2="280" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#115E59"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="104" y1="86" x2="214" y2="234" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#E2E8F0"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="24" width="256" height="272" rx="44" fill="url(#panel)"/>
+  <path d="M103 88C103 79.1634 110.163 72 119 72H179L217 110V220C217 228.837 209.837 236 201 236H119C110.163 236 103 228.837 103 220V88Z" fill="url(#paper)"/>
+  <path d="M179 72V100C179 108.837 186.163 116 195 116H217" fill="#CFFAFE"/>
+  <path d="M179 72V100C179 108.837 186.163 116 195 116H217" stroke="#99F6E4" stroke-width="6"/>
+  <path d="M126 131H194" stroke="#0F766E" stroke-width="10" stroke-linecap="round"/>
+  <path d="M126 158H194" stroke="#14B8A6" stroke-width="10" stroke-linecap="round"/>
+  <path d="M126 185H164" stroke="#0F766E" stroke-width="10" stroke-linecap="round"/>
+  <path d="M160 28L124 66" stroke="#67E8F9" stroke-width="8" stroke-linecap="round"/>
+  <path d="M219 53L194 78" stroke="#FDE68A" stroke-width="8" stroke-linecap="round"/>
+  <path d="M247 118L216 127" stroke="#A7F3D0" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="160" cy="28" r="18" fill="#67E8F9"/>
+  <circle cx="219" cy="53" r="16" fill="#FDE68A"/>
+  <circle cx="247" cy="118" r="14" fill="#A7F3D0"/>
+  <path d="M147 255C155 241 172.6 222.6 202.5 246" stroke="#FDE68A" stroke-width="10" stroke-linecap="round"/>
+  <path d="M201 231L220 247L198 264" stroke="#FDE68A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g fill="#0F172A">
+    <text x="336" y="126" font-family="Helvetica, Arial, sans-serif" font-size="56" font-weight="700" letter-spacing="1">CCG Grant Deliberation</text>
+    <text x="336" y="170" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="500" fill="#0F766E">Multi-model proposal review for research and engineering grants</text>
+    <text x="336" y="222" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="400" fill="#334155">Question framing · route selection · proposal-ready writing</text>
+  </g>
+</svg>

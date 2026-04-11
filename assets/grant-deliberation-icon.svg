@@ -1,9 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="16" fill="#0F766E"/>
-  <path d="M18 18H30C34.4183 18 38 21.5817 38 26V46H26C21.5817 46 18 42.4183 18 38V18Z" fill="#F0FDFA"/>
-  <path d="M46 18H38V26H46V18Z" fill="#99F6E4"/>
-  <path d="M26 30H46V38C46 42.4183 42.4183 46 38 46H26V30Z" fill="#14B8A6"/>
-  <path d="M24 24H32" stroke="#0F766E" stroke-width="3" stroke-linecap="round"/>
-  <path d="M24 32H40" stroke="#F0FDFA" stroke-width="3" stroke-linecap="round"/>
-  <path d="M24 38H36" stroke="#CCFBF1" stroke-width="3" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="20" y1="14" x2="108" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#115E59"/>
+    </linearGradient>
+    <linearGradient id="card" x1="40" y1="34" x2="88" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#E2E8F0"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)"/>
+  <path d="M39 36C39 31.5817 42.5817 28 47 28H72L89 45V92C89 96.4183 85.4183 100 81 100H47C42.5817 100 39 96.4183 39 92V36Z" fill="url(#card)"/>
+  <path d="M72 28V41C72 45.4183 75.5817 49 80 49H89" fill="#CFFAFE"/>
+  <path d="M72 28V41C72 45.4183 75.5817 49 80 49H89" stroke="#99F6E4" stroke-width="3"/>
+  <path d="M49 57H79" stroke="#0F766E" stroke-width="5" stroke-linecap="round"/>
+  <path d="M49 69H79" stroke="#14B8A6" stroke-width="5" stroke-linecap="round"/>
+  <path d="M49 81H67" stroke="#0F766E" stroke-width="5" stroke-linecap="round"/>
+  <path d="M64 14L47 31" stroke="#67E8F9" stroke-width="4" stroke-linecap="round"/>
+  <path d="M91 26L79 38" stroke="#FDE68A" stroke-width="4" stroke-linecap="round"/>
+  <path d="M104 55L89 59" stroke="#A7F3D0" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="64" cy="14" r="9" fill="#67E8F9"/>
+  <circle cx="91" cy="26" r="8" fill="#FDE68A"/>
+  <circle cx="104" cy="55" r="7" fill="#A7F3D0"/>
+  <path d="M58 108C60.6667 103.333 66.5333 97.2 76.5 105" stroke="#FDE68A" stroke-width="5" stroke-linecap="round"/>
+  <path d="M76 100L82 106L75 112" stroke="#FDE68A" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
