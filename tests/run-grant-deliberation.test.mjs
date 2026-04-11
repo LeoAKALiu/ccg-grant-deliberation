@@ -464,25 +464,42 @@ describe('grant deliberation helpers', () => {
     expect(resolved.resumePhase).toBe('openings')
   })
 
-  it('caps checkpoint directory scan to the five most recent runs', async () => {
+  it('marks explicit resume when no valid checkpoint is found', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-research-resume-miss-'))
+    tmpDirs.push(tmpDir)
+
+    const resolved = await resolveResearchCheckpointSession({
+      cwd: tmpDir,
+      topic: 'missing resume topic',
+      template: 'research',
+      runId: '2026-04-11T17-00-00-000Z-run',
+      mode: 'resume',
+    })
+
+    expect(resolved.reused).toBe(false)
+    expect(resolved.resumeRequestedButMissing).toBe(true)
+  })
+
+  it('scans lazily across recent checkpoint runs instead of hard-stopping at five', async () => {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-research-scan-cap-'))
     tmpDirs.push(tmpDir)
     const topic = 'scan cap topic'
 
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       const runId = `2026-04-11T1${index}-00-00-000Z-run`
       const checkpointDir = buildResearchCheckpointRunDir(tmpDir, topic, 'research', runId)
-      await writeResearchCheckpoint({
-        checkpointDir,
-        phase: 'openings',
-        topic,
-        template: 'research',
-        payload: { gemini: {}, claude: {}, gpt: {} },
-      })
+      await mkdir(checkpointDir, { recursive: true })
+      await writeFile(getResearchCheckpointFilePath(checkpointDir, 'openings'), '{bad json', 'utf-8')
     }
 
-    const newestDir = buildResearchCheckpointRunDir(tmpDir, topic, 'research', '2026-04-11T16-00-00-000Z-run')
-    await writeFile(getResearchCheckpointFilePath(newestDir, 'openings'), '{bad json', 'utf-8')
+    const olderValidDir = buildResearchCheckpointRunDir(tmpDir, topic, 'research', '2026-04-11T09-00-00-000Z-run')
+    await writeResearchCheckpoint({
+      checkpointDir: olderValidDir,
+      phase: 'openings',
+      topic,
+      template: 'research',
+      payload: { gemini: {}, claude: {}, gpt: {} },
+    })
 
     const resolved = await resolveResearchCheckpointSession({
       cwd: tmpDir,
@@ -492,7 +509,7 @@ describe('grant deliberation helpers', () => {
       mode: 'auto',
     })
 
-    expect(resolved.runId).toBe('2026-04-11T15-00-00-000Z-run')
+    expect(resolved.runId).toBe('2026-04-11T09-00-00-000Z-run')
   })
 
   it('derives resume priority and pending writing stages from available checkpoints', () => {

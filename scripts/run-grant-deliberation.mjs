@@ -392,6 +392,7 @@ export async function resolveResearchCheckpointSession({
 }) {
   const topicDir = buildResearchCheckpointTopicDir(cwd, topic, template)
   await mkdir(topicDir, { recursive: true })
+  let resumeRequestedButMissing = false
 
   if (mode !== 'fresh') {
     const entries = await readdir(topicDir, { withFileTypes: true }).catch(() => [])
@@ -400,9 +401,13 @@ export async function resolveResearchCheckpointSession({
       .map(entry => entry.name)
       .sort()
       .reverse()
-      .slice(0, 5)
 
+    let scanned = 0
     for (const candidateRunId of runIds) {
+      scanned += 1
+      if (scanned > 20) {
+        break
+      }
       const state = await loadResearchCheckpointState({ cwd, topic, template, runId: candidateRunId })
       if (state?.resumePhase) {
         return {
@@ -411,8 +416,13 @@ export async function resolveResearchCheckpointSession({
           created: false,
           mode,
           providerStrategy,
+          resumeRequestedButMissing: false,
         }
       }
+    }
+
+    if (mode === 'resume') {
+      resumeRequestedButMissing = true
     }
   }
 
@@ -435,6 +445,7 @@ export async function resolveResearchCheckpointSession({
     created: true,
     mode,
     providerStrategy,
+    resumeRequestedButMissing,
   }
 }
 
@@ -882,7 +893,7 @@ function buildLightOpeningContext(dossier, providerLabel) {
   const materialItems = Array.isArray(dossier.materials) && dossier.materials.length > 0
     ? dossier.materials
       .slice(0, 2)
-      .map((item, index) => `- 材料 ${index + 1}：${normalizeWhitespace(item.summary).slice(0, 120)}`)
+      .map((item, index) => `- 材料 ${index + 1}：${item.summary.slice(0, 120)}`)
     : ['- 未提供可读材料，仅基于议题论证']
 
   return [
@@ -1915,7 +1926,7 @@ async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, t
   throw new Error(`${label} exhausted retries`)
 }
 
-async function runWrapperTask({ wrapperPath, backend, prompt, workdir, sessionId = null, label, tracker, actorId, geminiModel, expectJson = true, trace, traceMeta = {} }) {
+async function runWrapperTask({ backend, prompt, workdir, label, tracker, actorId, geminiModel, expectJson = true, trace, traceMeta = {} }) {
   if (shouldUseDirectCodexForDebater({ backend, actorId })) {
     return runCodexDirectTask({
       prompt,
@@ -1953,194 +1964,7 @@ async function runWrapperTask({ wrapperPath, backend, prompt, workdir, sessionId
       expectJson,
     })
   }
-  let attempt = 0
-
-  while (attempt < 2) {
-    attempt += 1
-    tracker.setActorState(actorId, attempt === 1 ? 'running' : 'retrying')
-    tracker.setLatestSignal(actorId, attempt === 1 ? `已启动 ${label}` : `正在重试 ${label}（第 ${attempt} 次）`, true)
-
-    const args = ['--progress', '--backend', backend]
-    if (backend === 'gemini' && geminiModel) {
-      args.push('--gemini-model', geminiModel)
-    }
-    if (sessionId) {
-      args.push('resume', sessionId, '-', workdir)
-    }
-    else {
-      args.push('-', workdir)
-    }
-    const promptToSend = buildTracePrompt(trace, traceMeta, prompt)
-    const taskTrace = trace
-      ? await trace.writeTask({
-          phase: traceMeta.phase || 'wrapper',
-          provider: traceMeta.provider || actorId || backend,
-          label,
-          backend,
-          attempt,
-          prompt: promptToSend,
-          args,
-          workdir,
-          sessionId: sessionId || '',
-          stdout: '',
-          stderr: '',
-          exit_code: null,
-          parse_status: 'started',
-        })
-      : ''
-
-    const child = spawn(wrapperPath, args, {
-      cwd: workdir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
-    })
-
-    const stdoutChunks = []
-    const stderrChunks = []
-    let earlySessionId = ''
-
-    child.stdout.on('data', (chunk) => {
-      stdoutChunks.push(String(chunk))
-    })
-
-    child.stderr.on('data', (chunk) => {
-      const text = String(chunk)
-      stderrChunks.push(text)
-      for (const line of text.split(/\r?\n/).filter(Boolean)) {
-        if (line.includes('Session-ID:')) {
-          earlySessionId = line.split('Session-ID:')[1]?.trim() || earlySessionId
-        }
-        if (line.startsWith('[PROGRESS]')) {
-          tracker.setLatestSignal(actorId, humanizeProgressLine(line))
-        }
-      }
-    })
-
-    child.stdin.write(promptToSend)
-    child.stdin.end()
-
-    const exitCode = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        tracker.setLatestSignal(actorId, `${label} 超时，正在终止`, true)
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 1000).unref?.()
-        reject(new Error(`${label} timed out after ${DEFAULT_TASK_TIMEOUT_MS}ms`))
-      }, DEFAULT_TASK_TIMEOUT_MS)
-
-      child.on('error', (error) => {
-        clearTimeout(timeout)
-        reject(error)
-      })
-      child.on('close', (code) => {
-        clearTimeout(timeout)
-        resolve(code)
-      })
-    })
-
-    const stdout = stdoutChunks.join('')
-    const stderr = stderrChunks.join('')
-
-    if (trace) {
-      await trace.updateTask(taskTrace, {
-        sessionId: earlySessionId || sessionId || '',
-        stdout,
-        stderr,
-        exit_code: exitCode,
-      })
-    }
-
-    if (exitCode !== 0) {
-      if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'process_error' })
-        await trace.writeEvent({
-          type: 'provider_failure',
-          phase: traceMeta.phase || 'wrapper',
-          provider: traceMeta.provider || actorId || backend,
-          label,
-          attempt,
-          reason: 'process_error',
-          task_file: taskTrace,
-        })
-      }
-      if (attempt < 2) {
-        tracker.setLatestSignal(actorId, `${label} 失败，准备重试：exit ${exitCode}`, true)
-        continue
-      }
-      tracker.setActorState(actorId, 'failed')
-      throw new Error(`${label} failed with exit code ${exitCode}\n${stderr || stdout}`)
-    }
-
-    const parsed = parseWrapperOutput(stdout)
-    if (!parsed.message) {
-      if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'empty_output' })
-        await trace.writeEvent({
-          type: 'provider_failure',
-          phase: traceMeta.phase || 'wrapper',
-          provider: traceMeta.provider || actorId || backend,
-          label,
-          attempt,
-          reason: 'empty_output',
-          task_file: taskTrace,
-        })
-      }
-      if (attempt < 2) {
-        tracker.setLatestSignal(actorId, `${label} 未返回正文，准备重试`, true)
-        continue
-      }
-      tracker.setActorState(actorId, 'failed')
-      throw new Error(`${label} completed without message output`)
-    }
-
-    if (expectJson) {
-      try {
-        extractJsonPayload(parsed.message)
-      }
-      catch (error) {
-        if (trace) {
-          await trace.updateTask(taskTrace, { parse_status: 'invalid_json' })
-          await trace.writeEvent({
-            type: 'provider_failure',
-            phase: traceMeta.phase || 'wrapper',
-            provider: traceMeta.provider || actorId || backend,
-            label,
-            attempt,
-            reason: 'invalid_json',
-            task_file: taskTrace,
-            error: String(error instanceof Error ? error.message : error),
-          })
-        }
-        if (attempt < 2) {
-          tracker.setLatestSignal(actorId, `${label} 返回了非法 JSON，准备重试`, true)
-          continue
-        }
-        tracker.setActorState(actorId, 'failed')
-        throw new Error(`${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`)
-      }
-    }
-
-    tracker.setActorState(actorId, 'completed')
-    tracker.setLatestSignal(actorId, `${label} 已完成`, true)
-    if (trace) {
-      await trace.updateTask(taskTrace, { parse_status: 'ok' })
-      await trace.writeEvent({
-        type: 'provider_success',
-        phase: traceMeta.phase || 'wrapper',
-        provider: traceMeta.provider || actorId || backend,
-        label,
-        attempt,
-        task_file: taskTrace,
-      })
-    }
-    return {
-      message: parsed.message,
-      sessionId: parsed.sessionId || earlySessionId,
-      stdout,
-      stderr,
-    }
-  }
-
-  throw new Error(`${label} exhausted retries`)
+  throw new Error(`Unsupported debater dispatch: backend=${backend}, actorId=${actorId || 'unknown'}`)
 }
 
 async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, expectJson = true, trace, traceMeta = {} }) {
@@ -2577,6 +2401,9 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
     }
 
     tracker.setPhase(`环境检查完成（${runtimeContext.runMode}）`)
+    if (researchCheckpoint?.resumeRequestedButMissing) {
+      console.error('警告：未找到可恢复的 research checkpoint，将按全新运行执行。')
+    }
     if (trace.enabled) {
       await trace.writeEvent({ type: 'phase_enter', phase: '环境检查完成', trace_id: traceId })
     }
@@ -3070,6 +2897,8 @@ async function main() {
 
   if (options.template !== 'research' && (options.resumeResearch || options.freshResearch)) {
     console.error('警告：--resume-research / --fresh-research 仅在 --template research 下生效，当前将忽略。')
+    options.resumeResearch = false
+    options.freshResearch = false
   }
 
   const scratchDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-grant-deliberation-'))

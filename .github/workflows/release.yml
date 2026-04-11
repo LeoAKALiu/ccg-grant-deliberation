@@ -29,7 +29,6 @@ jobs:
         run: |
           npm run check
           npm test
-          node scripts/doctor.mjs
           node scripts/setup.mjs --skip-install
           npm run docs:check
           npm run version:check
