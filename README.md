@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./package.json)
 [![Status](https://img.shields.io/badge/status-beta-0F766E)](https://github.com/LeoAKALiu/ccg-grant-deliberation)
-[![Release Target](https://img.shields.io/badge/release-v0.2.0--prerelease-F59E0B)](./CHANGELOG.md)
+[![Release Target](https://img.shields.io/badge/release-v0.2.1--prerelease-F59E0B)](./CHANGELOG.md)
 [![Templates](https://img.shields.io/badge/templates-research%20%7C%20engineering-2563EB)](#模板)
 [![Runtime](https://img.shields.io/badge/runtime-full%20%7C%20partial%20%7C%20minimal-7C3AED)](#运行模式)
 
@@ -31,6 +31,12 @@
 
 - 模板化章节映射  
   支持 `research` 与 `engineering` 两类模板。
+
+- `research` 质量增强链  
+  `research` 模板默认启用 strategy brief、claim-evidence alignment、grant reviewer simulation 与 style brief extraction 四项内部质量控制。
+
+- `research` 收敛版会审路径  
+  `research` 模式会先做 pair triage，仅围绕最高价值的 1 组分歧进入 focused rebuttal，然后尽快进入 strategist / composer / reviewer / final synthesis。
 
 - 环境自诊断  
   提供 `setup` / `doctor` 入口，检查依赖与运行模式。
@@ -70,6 +76,31 @@
 - `codex`
 - `gemini`
 - `claude`
+
+## Provider Strategy
+
+当前 provider strategy 如下：
+
+- `gemini: direct`
+- `claude: direct`
+- `codex: wrapper`
+
+设计原因：
+
+- `Gemini` 与 `Claude` 走本地 CLI 直连，以减少 `codeagent-wrapper` 带来的 localhost/Web UI 副作用，并获得更直接的文本/JSON 输出。
+- `Codex` 仍保留 wrapper 路径，因为当前 research 增强链中的 strategist / composer / reviewer / final synthesis 仍依赖这条执行方式。
+
+当前仍有意义的环境变量：
+
+- `CCG_TASK_TIMEOUT_MS`
+- `CCG_RUN_TIMEOUT_MS`
+- `CCG_TRACE`
+- `GEMINI_MODEL`
+
+说明：
+
+- `codeagent-wrapper` 仍是最低运行门槛的一部分，因为 `codex` 仍在使用它。
+- 但 `Gemini` / `Claude` 已不再默认经过 wrapper。
 
 ## 快速开始
 
@@ -126,6 +157,7 @@ node scripts/run-grant-deliberation.mjs [options]
 - `--language <lang>`：输出语言，默认 `zh-CN`
 - `--focus <a,b,c>`：关注维度
 - `--template <name>`：章节模板，支持 `research` 或 `engineering`
+- `--trace`：将完整编排 trace 落到 `.omx/trace/`
 - `--output <path>`：自定义输出路径
 
 ## 模板
@@ -142,6 +174,17 @@ node scripts/run-grant-deliberation.mjs [options]
 - 可行性与风险
 
 该模板已经吸收 `scientific-writing` 风格约束：强调完整段落、问题与知识空白链路、术语一致、克制表达、创新建立在现有不足之上，并显式交代风险与证据边界。
+
+此外，`research` 模板默认包含四项内部增强：
+
+- strategy brief
+- claim-evidence alignment
+- grant reviewer simulation
+- style brief extraction
+
+这些能力的理念吸收并本地化改造自多个外部学术写作与研究技能仓库，用于提高科技申请书正文的论证密度、证据约束和评审适配性。
+
+同时，为了尽快稳定落出成品，`research` 模式不再默认完整跑完所有 rebuttal/addendum 轮次，而是优先收敛到最有价值的一组分歧后进入写作阶段。
 
 ### `engineering`
 
@@ -174,6 +217,12 @@ node scripts/run-grant-deliberation.mjs [options]
 
 报告会显式写出运行状态、运行级别与实际参与方。
 
+命令行结束或失败时也会输出 provider strategy summary：
+
+- `gemini: direct`
+- `claude: direct`
+- `codex: wrapper`
+
 ## 输出内容
 
 默认输出路径：
@@ -200,15 +249,30 @@ reports/ccg-grant-deliberation/<topic-slug>.md
 - [通用示例报告](./examples/output/example-report.md)
 - [研究类模板示例报告](./examples/output/example-report-research.md)
 
+## 调试编排
+
+如需验证不同 provider 是否真正接收到了 Codex 编排，可显式开启本地 trace：
+
+```bash
+node scripts/run-grant-deliberation.mjs --trace --template research ...
+```
+
+说明：
+
+- trace 默认关闭
+- trace 会完整落到 `.omx/trace/`
+- 会保存 prompt、provider 原始 stdout/stderr、阶段事件与失败原因
+- 仅适合本地排查，不属于普通日常运行必需功能
+
 ## 发布状态
 
 当前仓库状态：
 
-- 当前代码版本：`0.2.0`
+- 当前代码版本：`0.2.1`
 - 当前定位：`beta`
 - 当前发布方式：Git tag 驱动的 GitHub prerelease
 - 当前规则来源：[CHANGELOG.md](./CHANGELOG.md) + [docs/releasing.md](./docs/releasing.md)
-- 当前事实：首个正式 GitHub Release 目标为 `v0.2.0` prerelease
+- 当前事实：当前 GitHub prerelease 目标为 `v0.2.1`
 
 发布规则：
 
@@ -218,7 +282,7 @@ reports/ccg-grant-deliberation/<topic-slug>.md
 
 当前目标：
 
-- `v0.2.0`：第一版正式 GitHub prerelease，包含 CI、版本同步、changelog 驱动 release notes 与 tag 驱动发布
+- `v0.2.1`：聚焦 research 模式的 provider 直连、trace、收敛版路径与研究写作链打通
 
 ## 路线图
 
@@ -229,6 +293,7 @@ reports/ccg-grant-deliberation/<topic-slug>.md
 - [x] 降级运行模式：`full / partial / minimal`
 - [x] `research` / `engineering` 模板入口
 - [x] `research` 模板吸收 scientific-writing 写作约束
+- [x] `research` 模板默认启用 strategy / claim-evidence / reviewer / style brief 内部质量链
 - [x] GitHub Actions CI 工作流
 - [x] tag 驱动的 GitHub prerelease 工作流
 
@@ -303,3 +368,5 @@ npm test
 本项目的多模型交叉论证思路来源于 [ccg-workflow](https://github.com/fengshao1227/ccg-workflow)。
 
 在此基础上，`ccg-grant-deliberation` 将目标明确收束为科技申请书撰写、会审与改写，不追求通用工作流能力，而专注于“问题是否成立、路线如何取舍、结论如何写进申报书”。
+
+其中 `research` 模板中的 strategy brief、claim-evidence alignment、reviewer simulation 与 style brief extraction 等理念，进一步吸收并改造自多个外部学术写作/研究技能仓库，以适配科技申请书场景，而不是直接照搬论文写作工作流。

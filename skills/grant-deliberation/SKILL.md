@@ -44,6 +44,7 @@ node scripts/run-grant-deliberation.mjs \
    - 报告路径
    - 当前运行级别（full / partial / minimal）
    - 当前章节模板（research / engineering / 通用）
+   - provider strategy（gemini: direct / claude: direct / codex: wrapper）
    - 最优技术路线
    - 关键科学问题
    - 工程化难点
@@ -55,6 +56,21 @@ node scripts/run-grant-deliberation.mjs \
 - 不要把研究类章节写成 bullet list
 - 强化“研究意义 -> 知识空白 -> 研究目标 -> 创新点 -> 技术路线 -> 可行性与风险”的逻辑链
 - 避免夸大式表述和无证据支撑的结论
+- 默认启用 strategy brief、claim-evidence alignment、grant reviewer simulation 与 style brief extraction
+- 默认采用收敛版会审路径：先做 pair triage，只围绕最高价值的 1 组分歧进入 focused rebuttal，然后尽快进入 strategist / composer / reviewer / final synthesis
+- 这些中间步骤只用于内部质量控制，最终仍只向用户展示成品章节与正文
+
+如果用户明确要求排查“provider 是否真的收到编排”：
+
+- 优先建议使用 `--trace`
+- trace 会落到 `.omx/trace/`
+- trace 会保存完整 prompt 与 provider 原始输出，仅适合本地调试
+
+当前 provider strategy：
+
+- `gemini: direct`
+- `claude: direct`
+- `codex: wrapper`
 
 ## 不要做的事
 

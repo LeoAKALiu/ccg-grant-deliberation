@@ -5,9 +5,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildDossier,
   buildFinalSynthesisTask,
+  buildOpeningTask,
   buildPairScoreTask,
+  buildResearchComposeTask,
+  buildResearchFinalSynthesisTask,
+  buildResearchOutlineTask,
+  buildResearchReviewTask,
+  buildResearchStrategyTask,
   buildRoundRobinPairs,
   extractJsonPayload,
+  inferStyleBrief,
   parseCliArgs,
   parseWrapperOutput,
   renderMarkdownReport,
@@ -55,11 +62,17 @@ describe('grant deliberation helpers', () => {
     expect(parseCliArgs(['--topic', 't', '--template', 'engineering']).template).toBe('engineering')
     expect(parseCliArgs(['--topic', 't']).template).toBe('')
     expect(parseCliArgs(['--topic', 't', '--template', 'invalid']).template).toBe('')
+    expect(parseCliArgs(['--topic', 't', '--trace']).trace).toBe(true)
   })
 
   it('extracts JSON from fenced output', () => {
     const parsed = extractJsonPayload('```json\n{"ok":true,"value":1}\n```')
     expect(parsed).toEqual({ ok: true, value: 1 })
+  })
+
+  it('cleans MCP prelude and trailing commas before parsing JSON', () => {
+    const parsed = extractJsonPayload('MCP issues detected. Run /mcp list for status.\n{"ok": true, "items": [1,2,],}')
+    expect(parsed).toEqual({ ok: true, items: [1, 2] })
   })
 
   it('parses wrapper output and strips SESSION_ID trailer', () => {
@@ -93,6 +106,24 @@ describe('grant deliberation helpers', () => {
     expect(dossier.dossierText).toContain('施工调度研究材料')
     expect(dossier.dossierText).toContain('多智能体协同材料')
     expect(dossier.normalizedBrief).toContain('章节模板：research')
+    expect(dossier.researchEnhancementEnabled).toBe(true)
+    expect(dossier.styleBriefContext.detected).toBe(false)
+  })
+
+  it('infers a style brief from guide-like research materials', () => {
+    const result = inferStyleBrief({
+      template: 'research',
+      materials: [
+        {
+          path: '/tmp/国家自然科学基金申报指南.md',
+          summary: '本指南说明申请书写作要求、格式要求和注意事项。',
+        },
+      ],
+    })
+
+    expect(result.detected).toBe(true)
+    expect(result.brief).toContain('style learning')
+    expect(result.matchedMaterials[0].path).toContain('申报指南')
   })
 
   it('keeps chair tasks on fresh sessions', () => {
@@ -118,6 +149,111 @@ describe('grant deliberation helpers', () => {
     expect(finalTask.prompt).toContain('必须写成完整段落')
     expect(finalTask.prompt).toContain('章节顺序固定为：研究目标、关键科学问题、研究内容、创新点、技术路线、可行性与风险')
     expect(finalTask.prompt).toContain('避免夸大')
+  })
+
+  it('uses lighter dossiers for gemini and claude opening while keeping gpt on the full dossier', () => {
+    const dossier = {
+      topic: 't',
+      language: 'zh-CN',
+      focus: ['a', 'b'],
+      template: 'research',
+      materialWarnings: [],
+      materials: [
+        {
+          path: '/tmp/a.md',
+          excerpt: '材料节选',
+          summary: '材料节选',
+        },
+      ],
+      dossierText: '## 统一 dossier\n完整版',
+    }
+
+    const geminiTask = buildOpeningTask({ id: 'gemini', backend: 'gemini', display: 'Gemini', role: 'gemini-debater' }, dossier)
+    const claudeTask = buildOpeningTask({ id: 'claude', backend: 'claude', display: 'Claude', role: 'claude-debater' }, dossier)
+    const gptTask = buildOpeningTask({ id: 'gpt', backend: 'codex', display: 'GPT(codex)', role: 'codex-gpt-debater' }, dossier)
+
+    expect(geminiTask.prompt).toContain('已知背景：')
+    expect(geminiTask.prompt).toContain('只完成一件事：围绕当前议题输出一份 opening JSON。')
+    expect(geminiTask.prompt).not.toContain('## 统一 dossier\n完整版')
+    expect(claudeTask.prompt).toContain('已知背景：')
+    expect(claudeTask.prompt).toContain('只完成一件事：围绕当前议题输出一份 opening JSON。')
+    expect(claudeTask.prompt).not.toContain('补充材料：')
+    expect(claudeTask.prompt).not.toContain('## 统一 dossier\n完整版')
+    expect(gptTask.prompt).toContain('## 统一 dossier\n完整版')
+  })
+
+  it('builds research strategist/composer/reviewer prompts with internal quality controls', () => {
+    const dossier = {
+      topic: 't',
+      normalizedBrief: 'b',
+      dossierText: 'dossier',
+      template: 'research',
+      styleBriefContext: {
+        detected: true,
+        brief: '检测到可用于 style learning 的材料。',
+      },
+    }
+    const openings = { gemini: { stance: 'a' }, claude: { stance: 'b' }, gpt: { stance: 'c' } }
+    const pairResults = {}
+    const strategyTask = buildResearchStrategyTask(dossier, openings, pairResults, [])
+    const outlineTask = buildResearchOutlineTask(dossier, openings, pairResults, [], {
+      proposal_strategy: { narrative_positioning: 'x' },
+      style_brief: { source_mode: 'learned' },
+    })
+    const composeTask = buildResearchComposeTask(dossier, {
+      proposal_strategy: { narrative_positioning: 'x' },
+      style_brief: { source_mode: 'learned' },
+    }, {
+      proposal_section_mapping: { template: 'research', sections: [] },
+      selected_route: { name: '路线 A' },
+    })
+    const reviewTask = buildResearchReviewTask(dossier, { proposal_strategy: { narrative_positioning: 'x' } }, {
+      proposal_section_mapping: { template: 'research', sections: [] },
+      claim_evidence_alignment: [],
+    })
+    const finalTask = buildResearchFinalSynthesisTask(
+      dossier,
+      openings,
+      pairResults,
+      [],
+      { proposal_strategy: {} },
+      { proposal_section_mapping: { template: 'research', sections: [] } },
+      { claim_evidence_alignment: [] },
+      { review_scores: {} },
+    )
+
+    expect(strategyTask.prompt).toContain('阶段：research strategist')
+    expect(strategyTask.prompt).toContain('style brief 检测')
+    expect(outlineTask.prompt).toContain('阶段：research outline')
+    expect(outlineTask.prompt).toContain('先输出 research 章节骨架')
+    expect(composeTask.prompt).toContain('阶段：research composer')
+    expect(composeTask.prompt).toContain('claim-evidence alignment 约束')
+    expect(composeTask.prompt).toContain('supporting_evidence')
+    expect(reviewTask.prompt).toContain('阶段：research reviewer')
+    expect(reviewTask.prompt).toContain('grant reviewer 评分维度')
+    expect(reviewTask.prompt).toContain('立项必要性')
+    expect(finalTask.prompt).toContain('阶段：research final synthesis')
+    expect(finalTask.prompt).toContain('不要在最终 JSON 中展开 claim_evidence_alignment 或 reviewer 评分')
+  })
+
+  it('keeps engineering and generic modes on the existing single-stage final synthesis path', () => {
+    const engineeringTask = buildFinalSynthesisTask(
+      { topic: 't', normalizedBrief: 'b', dossierText: 'dossier', template: 'engineering' },
+      { gpt: { stance: 'c' } },
+      {},
+      [],
+    )
+    const genericTask = buildFinalSynthesisTask(
+      { topic: 't', normalizedBrief: 'b', dossierText: 'dossier', template: '' },
+      { gpt: { stance: 'c' } },
+      {},
+      [],
+    )
+
+    expect(engineeringTask.prompt).toContain('工程/落地类申请书章节映射')
+    expect(engineeringTask.prompt).not.toContain('research strategist')
+    expect(genericTask.prompt).toContain('本次无需额外输出章节模板映射')
+    expect(genericTask.prompt).not.toContain('claim-evidence alignment')
   })
 
   it('renders a report with all required sections', () => {

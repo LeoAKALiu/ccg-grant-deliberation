@@ -8,13 +8,14 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 const readmePath = path.join(repoRoot, 'README.md')
 const readme = readFileSync(readmePath, 'utf-8')
+const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf-8'))
 
 const requiredStrings = [
   'actions/workflows/ci.yml/badge.svg',
   'node scripts/setup.mjs',
   'node scripts/doctor.mjs',
   'node scripts/run-grant-deliberation.mjs',
-  'v0.2.0',
+  `v${packageJson.version}`,
   'prerelease',
 ]
 
