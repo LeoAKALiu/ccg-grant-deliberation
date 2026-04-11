@@ -7,20 +7,27 @@ import {
   buildFinalSynthesisTask,
   buildOpeningTask,
   buildPairScoreTask,
+  buildResearchCheckpointRunDir,
   buildResearchComposeTask,
   buildResearchFinalSynthesisTask,
   buildResearchOutlineTask,
   buildResearchReviewTask,
   buildResearchStrategyTask,
   buildRoundRobinPairs,
+  determineResearchResumePhase,
   extractJsonPayload,
+  getResearchCheckpointFilePath,
+  getResearchWritingPendingStages,
   inferStyleBrief,
+  loadResearchCheckpointState,
   parseCliArgs,
   parseWrapperOutput,
   renderMarkdownReport,
+  resolveResearchCheckpointSession,
   resolveOutputPath,
   shouldEscalatePair,
   slugifyTopic,
+  writeResearchCheckpoint,
 } from '../scripts/run-grant-deliberation.mjs'
 
 const tmpDirs = []
@@ -63,6 +70,8 @@ describe('grant deliberation helpers', () => {
     expect(parseCliArgs(['--topic', 't']).template).toBe('')
     expect(parseCliArgs(['--topic', 't', '--template', 'invalid']).template).toBe('')
     expect(parseCliArgs(['--topic', 't', '--trace']).trace).toBe(true)
+    expect(parseCliArgs(['--topic', 't', '--resume-research']).resumeResearch).toBe(true)
+    expect(parseCliArgs(['--topic', 't', '--fresh-research']).freshResearch).toBe(true)
   })
 
   it('extracts JSON from fenced output', () => {
@@ -254,6 +263,190 @@ describe('grant deliberation helpers', () => {
     expect(engineeringTask.prompt).not.toContain('research strategist')
     expect(genericTask.prompt).toContain('本次无需额外输出章节模板映射')
     expect(genericTask.prompt).not.toContain('claim-evidence alignment')
+  })
+
+  it('writes research checkpoint artifacts with phase metadata', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-research-checkpoint-'))
+    tmpDirs.push(tmpDir)
+    const checkpointDir = buildResearchCheckpointRunDir(tmpDir, '复杂施工现场协同调度', 'research', 'run-1')
+
+    await writeResearchCheckpoint({
+      checkpointDir,
+      phase: 'openings',
+      topic: '复杂施工现场协同调度',
+      template: 'research',
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex: wrapper'],
+      payload: { gemini: { stance: 'a' } },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir,
+      phase: 'pair-results',
+      topic: '复杂施工现场协同调度',
+      template: 'research',
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex: wrapper'],
+      payload: { pairResults: { x: {} }, escalatedPairs: ['x'] },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir,
+      phase: 'strategy',
+      topic: '复杂施工现场协同调度',
+      template: 'research',
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex: wrapper'],
+      payload: { proposal_strategy: {} },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir,
+      phase: 'outline',
+      topic: '复杂施工现场协同调度',
+      template: 'research',
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex: wrapper'],
+      payload: { proposal_section_mapping: { sections: [] } },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir,
+      phase: 'compose',
+      topic: '复杂施工现场协同调度',
+      template: 'research',
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex: wrapper'],
+      payload: { proposal_ready_paragraphs: {} },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir,
+      phase: 'review',
+      topic: '复杂施工现场协同调度',
+      template: 'research',
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex: wrapper'],
+      payload: { review_scores: {} },
+    })
+
+    const openingsRecord = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(getResearchCheckpointFilePath(checkpointDir, 'openings'), 'utf-8')))
+    const reviewRecord = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(getResearchCheckpointFilePath(checkpointDir, 'review'), 'utf-8')))
+
+    expect(openingsRecord.phase).toBe('openings')
+    expect(openingsRecord.topic).toBe('复杂施工现场协同调度')
+    expect(openingsRecord.template).toBe('research')
+    expect(openingsRecord.provider_strategy).toContain('codex: wrapper')
+    expect(reviewRecord.phase).toBe('review')
+  })
+
+  it('loads the latest resumable research checkpoint and restores intermediate state', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-research-resume-'))
+    tmpDirs.push(tmpDir)
+    const topic = '复杂施工现场协同调度'
+    const olderRun = '2026-04-11T10-00-00-000Z-run'
+    const newerRun = '2026-04-11T11-00-00-000Z-run'
+
+    const olderDir = buildResearchCheckpointRunDir(tmpDir, topic, 'research', olderRun)
+    const newerDir = buildResearchCheckpointRunDir(tmpDir, topic, 'research', newerRun)
+
+    await writeResearchCheckpoint({
+      checkpointDir: olderDir,
+      phase: 'openings',
+      topic,
+      template: 'research',
+      payload: { gemini: { stance: 'old' }, claude: { stance: 'old' }, gpt: { stance: 'old' } },
+    })
+
+    await writeResearchCheckpoint({
+      checkpointDir: newerDir,
+      phase: 'openings',
+      topic,
+      template: 'research',
+      payload: { gemini: { stance: 'a' }, claude: { stance: 'b' }, gpt: { stance: 'c' } },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir: newerDir,
+      phase: 'pair-results',
+      topic,
+      template: 'research',
+      payload: {
+        pairResults: {
+          'gemini-vs-claude': {},
+          'gemini-vs-gpt': {},
+          'claude-vs-gpt': {},
+        },
+        escalatedPairs: ['claude-vs-gpt'],
+      },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir: newerDir,
+      phase: 'strategy',
+      topic,
+      template: 'research',
+      payload: { proposal_strategy: { narrative_positioning: 'x' } },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir: newerDir,
+      phase: 'outline',
+      topic,
+      template: 'research',
+      payload: { proposal_section_mapping: { sections: [] } },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir: newerDir,
+      phase: 'compose',
+      topic,
+      template: 'research',
+      payload: { proposal_ready_paragraphs: { scientific_questions: 'x' } },
+    })
+    await writeResearchCheckpoint({
+      checkpointDir: newerDir,
+      phase: 'review',
+      topic,
+      template: 'research',
+      payload: { review_scores: { innovation: 4 } },
+    })
+
+    const loaded = await loadResearchCheckpointState({
+      cwd: tmpDir,
+      topic,
+      template: 'research',
+      runId: newerRun,
+    })
+    const resolved = await resolveResearchCheckpointSession({
+      cwd: tmpDir,
+      topic,
+      template: 'research',
+      runId: '2026-04-11T12-00-00-000Z-run',
+      mode: 'auto',
+    })
+
+    expect(loaded.resumePhase).toBe('review')
+    expect(loaded.restored.escalatedPairs).toEqual(['claude-vs-gpt'])
+    expect(resolved.reused).toBe(true)
+    expect(resolved.runId).toBe(newerRun)
+    expect(resolved.resumePhase).toBe('review')
+  })
+
+  it('derives resume priority and pending writing stages from available checkpoints', () => {
+    expect(determineResearchResumePhase({
+      openings: { payload: {} },
+      'pair-results': { payload: {} },
+      strategy: { payload: {} },
+    })).toBe('strategy')
+    expect(determineResearchResumePhase({
+      openings: { payload: {} },
+      'pair-results': { payload: {} },
+      strategy: { payload: {} },
+      outline: { payload: {} },
+      compose: { payload: {} },
+      review: { payload: {} },
+    })).toBe('review')
+
+    expect(getResearchWritingPendingStages({
+      strategy: { proposal_strategy: {} },
+    })).toEqual(['outline', 'compose', 'review'])
+    expect(getResearchWritingPendingStages({
+      strategy: { proposal_strategy: {} },
+      outline: { proposal_section_mapping: {} },
+      composedDraft: { proposal_ready_paragraphs: {} },
+    })).toEqual(['review'])
+    expect(getResearchWritingPendingStages({
+      strategy: {},
+      outline: {},
+      composedDraft: {},
+      review: {},
+    })).toEqual([])
   })
 
   it('renders a report with all required sections', () => {

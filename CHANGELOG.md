@@ -8,6 +8,24 @@ The format is intentionally lightweight and release-oriented for GitHub Releases
 
 - No unreleased entries yet.
 
+## v0.3.0
+
+### Added
+
+- Research checkpoint / resume under `.omx/checkpoints/` with stage-level persistence for `openings`, `pair-results`, `strategy`, `outline`, `compose`, `review`, and `final-summary`
+- New CLI flags `--resume-research` and `--fresh-research`
+- Failure and completion summaries now include checkpoint paths for research-mode continuation
+
+### Changed
+
+- `research` mode now reuses the latest resumable intermediate state by default instead of restarting the full live run
+- Research writing stages now run in a fill-missing-only mode, skipping strategist / outline / compose / review when valid checkpoint artifacts already exist
+- README and skill docs now document local continuation and recovery behavior for research live runs
+
+### Notes
+
+- `v0.3.0` is the next GitHub prerelease and focuses on making research-mode live runs resumable rather than re-running every provider stage from scratch.
+
 ## v0.2.1
 
 ### Added
@@ -25,7 +43,7 @@ The format is intentionally lightweight and release-oriented for GitHub Releases
 
 ### Notes
 
-- `v0.2.1` is the next GitHub prerelease and focuses on runtime stability, observability, and research-mode convergence rather than new end-user surface area.
+- `v0.2.1` focused on runtime stability, observability, and research-mode convergence rather than new end-user surface area.
 
 ## v0.2.0
 

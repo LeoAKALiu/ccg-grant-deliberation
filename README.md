@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./package.json)
 [![Status](https://img.shields.io/badge/status-beta-0F766E)](https://github.com/LeoAKALiu/ccg-grant-deliberation)
-[![Release Target](https://img.shields.io/badge/release-v0.2.1--prerelease-F59E0B)](./CHANGELOG.md)
+[![Release Target](https://img.shields.io/badge/release-v0.3.0--prerelease-F59E0B)](./CHANGELOG.md)
 [![Templates](https://img.shields.io/badge/templates-research%20%7C%20engineering-2563EB)](#模板)
 [![Runtime](https://img.shields.io/badge/runtime-full%20%7C%20partial%20%7C%20minimal-7C3AED)](#运行模式)
 
@@ -128,6 +128,16 @@ node scripts/run-grant-deliberation.mjs \
   --material examples/materials/minimal-brief.md
 ```
 
+Research 续跑：
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --resume-research \
+  --topic "论证某科技项目申请书的关键科学问题、工程化难点和最优技术路线" \
+  --material examples/materials/minimal-brief.md
+```
+
 工程/落地类章节映射：
 
 ```bash
@@ -157,6 +167,8 @@ node scripts/run-grant-deliberation.mjs [options]
 - `--language <lang>`：输出语言，默认 `zh-CN`
 - `--focus <a,b,c>`：关注维度
 - `--template <name>`：章节模板，支持 `research` 或 `engineering`
+- `--resume-research`：显式从最近可恢复的 research checkpoint 恢复
+- `--fresh-research`：忽略已有 research checkpoint，从头重跑
 - `--trace`：将完整编排 trace 落到 `.omx/trace/`
 - `--output <path>`：自定义输出路径
 
@@ -185,6 +197,13 @@ node scripts/run-grant-deliberation.mjs [options]
 这些能力的理念吸收并本地化改造自多个外部学术写作与研究技能仓库，用于提高科技申请书正文的论证密度、证据约束和评审适配性。
 
 同时，为了尽快稳定落出成品，`research` 模式不再默认完整跑完所有 rebuttal/addendum 轮次，而是优先收敛到最有价值的一组分歧后进入写作阶段。
+
+此外，`research` 模式默认启用 checkpoint / resume：
+
+- checkpoint 目录：`.omx/checkpoints/`
+- 阶段文件：`openings / pair-results / strategy / outline / compose / review / final-summary`
+- 默认行为：优先复用最近一次可恢复的 research 中间产物
+- 强制从头运行：`--fresh-research`
 
 ### `engineering`
 
@@ -249,6 +268,17 @@ reports/ccg-grant-deliberation/<topic-slug>.md
 - [通用示例报告](./examples/output/example-report.md)
 - [研究类模板示例报告](./examples/output/example-report-research.md)
 
+## Checkpoint / Resume
+
+`research` 模式默认启用本地 checkpoint / resume，用于减少 provider 波动导致的整场重跑成本。
+
+- 自动恢复：默认查找最近一次可恢复的 `research` checkpoint
+- 显式恢复：`--resume-research`
+- 强制重跑：`--fresh-research`
+- 本地目录：`.omx/checkpoints/`
+
+这些 checkpoint 仅用于本地续跑与排障，不属于最终交付报告的一部分。
+
 ## 调试编排
 
 如需验证不同 provider 是否真正接收到了 Codex 编排，可显式开启本地 trace：
@@ -268,11 +298,11 @@ node scripts/run-grant-deliberation.mjs --trace --template research ...
 
 当前仓库状态：
 
-- 当前代码版本：`0.2.1`
+- 当前代码版本：`0.3.0`
 - 当前定位：`beta`
 - 当前发布方式：Git tag 驱动的 GitHub prerelease
 - 当前规则来源：[CHANGELOG.md](./CHANGELOG.md) + [docs/releasing.md](./docs/releasing.md)
-- 当前事实：当前 GitHub prerelease 目标为 `v0.2.1`
+- 当前事实：当前 GitHub prerelease 目标为 `v0.3.0`
 
 发布规则：
 
@@ -282,7 +312,7 @@ node scripts/run-grant-deliberation.mjs --trace --template research ...
 
 当前目标：
 
-- `v0.2.1`：聚焦 research 模式的 provider 直连、trace、收敛版路径与研究写作链打通
+- `v0.3.0`：聚焦 research 模式的 provider 直连、trace、收敛版路径，以及 checkpoint / resume 续跑能力
 
 ## 路线图
 

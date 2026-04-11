@@ -37,5 +37,5 @@ git push origin vX.Y.Z
 
 ## Current channel
 
-- `v0.2.1` is the current intended GitHub prerelease
+- `v0.3.0` is the current intended GitHub prerelease
 - Stable release policy can be revisited once live template quality and release automation are proven

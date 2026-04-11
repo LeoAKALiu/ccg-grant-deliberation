@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./package.json)
 [![Status](https://img.shields.io/badge/status-beta-0F766E)](https://github.com/LeoAKALiu/ccg-grant-deliberation)
-[![Release Target](https://img.shields.io/badge/release-v0.2.1--prerelease-F59E0B)](./CHANGELOG.md)
+[![Release Target](https://img.shields.io/badge/release-v0.3.0--prerelease-F59E0B)](./CHANGELOG.md)
 
 [中文](./README.md) | English
 
@@ -93,6 +93,16 @@ node scripts/run-grant-deliberation.mjs \
   --material examples/materials/minimal-brief.md
 ```
 
+Resume a research run:
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --resume-research \
+  --topic "Evaluate the key scientific questions, engineering bottlenecks, and best technical route for a technology grant proposal" \
+  --material examples/materials/minimal-brief.md
+```
+
 Engineering-style section mapping:
 
 ```bash
@@ -116,6 +126,8 @@ Main flags:
 - `--language <lang>`
 - `--focus <a,b,c>`
 - `--template <name>`: `research` or `engineering`
+- `--resume-research`: explicitly resume from the latest reusable research checkpoint
+- `--fresh-research`: ignore existing research checkpoints and rerun from scratch
 - `--trace`: write full local orchestration traces to `.omx/trace/`
 - `--output <path>`
 
@@ -144,6 +156,13 @@ In addition, the `research` template now enables four internal quality controls 
 These capabilities are distilled and localized from multiple external academic writing and research skill repositories to better fit technology grant proposal writing rather than paper-writing workflows.
 
 To improve the odds of producing a full deliverable, the `research` mode no longer tries to fully exhaust every rebuttal/addendum branch by default. Instead, it triages all pairs, keeps the single highest-value disagreement for focused rebuttal, and then moves into the writing stages.
+
+In addition, `research` now enables checkpoint / resume by default:
+
+- checkpoint directory: `.omx/checkpoints/`
+- stage files: `openings / pair-results / strategy / outline / compose / review / final-summary`
+- default behavior: reuse the latest resumable research intermediate state when available
+- force a clean rerun: `--fresh-research`
 
 ### `engineering`
 
@@ -202,11 +221,22 @@ Notes:
 - traces include prompts, raw stdout/stderr, phase events, and failure reasons
 - this is intended for local debugging rather than normal daily usage
 
+## Checkpoint / Resume
+
+`research` mode now uses local checkpoint / resume by default to avoid restarting a full live run every time a provider becomes unstable.
+
+- automatic resume: reuse the latest resumable `research` checkpoint
+- explicit resume: `--resume-research`
+- force a fresh run: `--fresh-research`
+- local directory: `.omx/checkpoints/`
+
+These checkpoints are local continuation/debug artifacts, not part of the final user-facing report.
+
 ## Release
 
 Current release target:
 
-- version: `0.2.1`
+- version: `0.3.0`
 - channel: GitHub prerelease
 - source of truth: [CHANGELOG.md](./CHANGELOG.md) and [docs/releasing.md](./docs/releasing.md)
 
