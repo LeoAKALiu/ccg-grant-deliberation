@@ -1,0 +1,161 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775918725387,
+  "projectRoot": "/Users/leo/Projects/ccg-grant-deliberation",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "vitest",
+        "version": "3.1.1",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "npm test",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {
+      "docs:check": "node scripts/check-docs.mjs",
+      "doctor": "node scripts/doctor.mjs",
+      "check": "node --check scripts/runtime-environment.mjs && node --check scripts/doctor.mjs && node --check scripts/setup.mjs && node --check scripts/run-grant-deliberation.mjs && node --check scripts/check-docs.mjs && node --check scripts/check-version-sync.mjs && node --check scripts/extract-release-notes.mjs",
+      "setup": "node scripts/setup.mjs",
+      "test": "vitest run",
+      "version:check": "node scripts/check-version-sync.mjs"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "assets",
+      "docs",
+      "examples",
+      "scripts",
+      "tests"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "assets": {
+      "path": "assets",
+      "purpose": "Static assets",
+      "fileCount": 2,
+      "lastAccessed": 1775918725306,
+      "keyFiles": [
+        "grant-deliberation-icon.svg",
+        "grant-deliberation-logo.png"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 3,
+      "lastAccessed": 1775918725307,
+      "keyFiles": [
+        "privacy.md",
+        "releasing.md",
+        "terms.md"
+      ]
+    },
+    "examples": {
+      "path": "examples",
+      "purpose": "Example code",
+      "fileCount": 0,
+      "lastAccessed": 1775918725317,
+      "keyFiles": []
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 9,
+      "lastAccessed": 1775918725318,
+      "keyFiles": [
+        "check-docs.mjs",
+        "check-version-sync.mjs",
+        "doctor.mjs",
+        "extract-release-notes.mjs",
+        "run-grant-deliberation.mjs"
+      ]
+    },
+    "skills": {
+      "path": "skills",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1775918725319,
+      "keyFiles": []
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 5,
+      "lastAccessed": 1775918725319,
+      "keyFiles": [
+        "doctor.test.mjs",
+        "plugin-manifest.test.mjs",
+        "run-grant-deliberation.test.mjs",
+        "runtime-environment.test.mjs",
+        "trace-recorder.test.mjs"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "scripts/run-grant-deliberation.mjs",
+      "accessCount": 7,
+      "lastAccessed": 1775918853867,
+      "type": "file"
+    },
+    {
+      "path": "tests/run-grant-deliberation.test.mjs",
+      "accessCount": 3,
+      "lastAccessed": 1775918859338,
+      "type": "file"
+    },
+    {
+      "path": "scripts/doctor.mjs",
+      "accessCount": 1,
+      "lastAccessed": 1775918816032,
+      "type": "file"
+    },
+    {
+      "path": "scripts/runtime-environment.mjs",
+      "accessCount": 1,
+      "lastAccessed": 1775918822669,
+      "type": "file"
+    },
+    {
+      "path": "scripts/trace-recorder.mjs",
+      "accessCount": 1,
+      "lastAccessed": 1775918831008,
+      "type": "file"
+    },
+    {
+      "path": "tests/trace-recorder.test.mjs",
+      "accessCount": 1,
+      "lastAccessed": 1775918845280,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

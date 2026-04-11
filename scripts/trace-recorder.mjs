@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 function sanitizeSegment(value) {
@@ -43,8 +43,7 @@ export async function createTraceRecorder({
       timestamp: new Date().toISOString(),
       ...event,
     })
-    const previous = await readSafe(eventsPath)
-    await writeFile(eventsPath, `${previous}${line}\n`, 'utf-8')
+    await appendFile(eventsPath, `${line}\n`, 'utf-8')
   }
 
   async function writeTask(task) {
@@ -78,14 +77,5 @@ export async function createTraceRecorder({
     writeEvent,
     updateTask,
     writeTask,
-  }
-}
-
-async function readSafe(filePath) {
-  try {
-    return await readFile(filePath, 'utf-8')
-  }
-  catch {
-    return ''
   }
 }

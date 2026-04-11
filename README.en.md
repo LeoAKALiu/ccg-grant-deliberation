@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./package.json)
 [![Status](https://img.shields.io/badge/status-beta-0F766E)](https://github.com/LeoAKALiu/ccg-grant-deliberation)
-[![Release Target](https://img.shields.io/badge/release-v0.3.0--prerelease-F59E0B)](./CHANGELOG.md)
+[![Release Target](https://img.shields.io/badge/release-prerelease-F59E0B)](./CHANGELOG.md)
 
 [中文](./README.md) | English
 

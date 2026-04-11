@@ -299,6 +299,9 @@ async function readJsonFileIfExists(filePath) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       return null
     }
+    if (error instanceof SyntaxError) {
+      return null
+    }
     throw error
   }
 }
@@ -397,6 +400,7 @@ export async function resolveResearchCheckpointSession({
       .map(entry => entry.name)
       .sort()
       .reverse()
+      .slice(0, 5)
 
     for (const candidateRunId of runIds) {
       const state = await loadResearchCheckpointState({ cwd, topic, template, runId: candidateRunId })
@@ -871,34 +875,34 @@ function buildResearchReviewerRubric() {
   ].join('\n')
 }
 
-function buildGeminiOpeningContext(dossier) {
+function buildLightOpeningContext(dossier, providerLabel) {
+  const focusItems = Array.isArray(dossier.focus) && dossier.focus.length > 0
+    ? dossier.focus.map(item => `- ${item}`)
+    : ['- key_scientific_questions', '- engineering_bottlenecks', '- technical_route']
+  const materialItems = Array.isArray(dossier.materials) && dossier.materials.length > 0
+    ? dossier.materials
+      .slice(0, 2)
+      .map((item, index) => `- 材料 ${index + 1}：${normalizeWhitespace(item.summary).slice(0, 120)}`)
+    : ['- 未提供可读材料，仅基于议题论证']
+
   return [
     `议题：${dossier.topic}`,
+    `模板：${dossier.template || '通用'}`,
+    `面向 provider：${providerLabel}`,
     '已知背景：',
-    '- 现场任务调度高度依赖人工经验',
-    '- 多工种并行作业导致动态冲突频发',
-    '- 现有系统更多停留在静态计划或单点优化',
+    ...materialItems,
     '申报关注点：',
-    '- 关键科学问题是否足够清晰',
-    '- 工程化难点是否真实且可验证',
-    '- 技术路线是否兼顾研究价值与交付可行性',
+    ...focusItems,
     dossier.materialWarnings?.length > 0 ? `材料警告：${dossier.materialWarnings.join('；')}` : '',
   ].filter(Boolean).join('\n')
 }
 
+function buildGeminiOpeningContext(dossier) {
+  return buildLightOpeningContext(dossier, 'Gemini')
+}
+
 function buildClaudeOpeningContext(dossier) {
-  return [
-    `议题：${dossier.topic}`,
-    '已知背景：',
-    '- 现场任务调度高度依赖人工经验',
-    '- 多工种并行作业导致动态冲突频发',
-    '- 现有系统更多停留在静态计划或单点优化',
-    '申报关注点：',
-    '- 关键科学问题是否足够清晰',
-    '- 工程化难点是否真实且可验证',
-    '- 技术路线是否兼顾研究价值与交付可行性',
-    dossier.materialWarnings?.length > 0 ? `材料警告：${dossier.materialWarnings.join('；')}` : '',
-  ].filter(Boolean).join('\n')
+  return buildLightOpeningContext(dossier, 'Claude')
 }
 
 export function buildOpeningTask(actor, dossier) {
@@ -1291,6 +1295,8 @@ export function buildResearchFinalSynthesisTask(dossier, openings, pairResults, 
     resumeSession: null,
     prompt: [
       ROLE_PROMPTS[CHAIR.role].trim(),
+      '',
+      EXECUTION_GUARDRAILS,
       '',
       dossier.dossierText,
       '',
@@ -1909,9 +1915,7 @@ async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, t
   throw new Error(`${label} exhausted retries`)
 }
 
-async function runWrapperTask({ wrapperPath, backend, prompt, workdir, sessionId = null, label, tracker, actorId, geminiModel, expectJson = true }) {
-  const trace = arguments[0].trace
-  const traceMeta = arguments[0].traceMeta || {}
+async function runWrapperTask({ wrapperPath, backend, prompt, workdir, sessionId = null, label, tracker, actorId, geminiModel, expectJson = true, trace, traceMeta = {} }) {
   if (shouldUseDirectCodexForDebater({ backend, actorId })) {
     return runCodexDirectTask({
       prompt,
@@ -2139,9 +2143,7 @@ async function runWrapperTask({ wrapperPath, backend, prompt, workdir, sessionId
   throw new Error(`${label} exhausted retries`)
 }
 
-async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, expectJson = true }) {
-  const trace = arguments[0].trace
-  const traceMeta = arguments[0].traceMeta || {}
+async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, expectJson = true, trace, traceMeta = {} }) {
   if (shouldUseDirectCodexForChair(traceMeta)) {
     return runCodexDirectTask({
       prompt,
@@ -3064,6 +3066,10 @@ async function main() {
   if (options.help || !options.topic) {
     printUsage()
     process.exit(options.help ? 0 : 1)
+  }
+
+  if (options.template !== 'research' && (options.resumeResearch || options.freshResearch)) {
+    console.error('警告：--resume-research / --fresh-research 仅在 --template research 下生效，当前将忽略。')
   }
 
   const scratchDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-grant-deliberation-'))

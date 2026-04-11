@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -25,6 +25,8 @@ import {
   renderMarkdownReport,
   resolveResearchCheckpointSession,
   resolveOutputPath,
+  scoreResearchPairPriority,
+  selectResearchFocusPairs,
   shouldEscalatePair,
   slugifyTopic,
   writeResearchCheckpoint,
@@ -94,6 +96,17 @@ describe('grant deliberation helpers', () => {
     expect(shouldEscalatePair({ conflict_score: 0.4, unresolved_degree: 0.81 })).toBe(true)
     expect(shouldEscalatePair({ conflict_score: 0.4, unresolved_degree: 0.2, decision_status: 'needs_addendum' })).toBe(true)
     expect(shouldEscalatePair({ conflict_score: 0.3, unresolved_degree: 0.2, decision_status: 'settled' })).toBe(false)
+  })
+
+  it('scores and selects the highest-priority research focus pair', () => {
+    expect(scoreResearchPairPriority({ conflict_score: 0.2, unresolved_degree: 0.8 })).toBe(0.8)
+    expect(selectResearchFocusPairs([
+      { pair: { id: 'a' }, score: { conflict_score: 0.73, unresolved_degree: 0.2 } },
+      { pair: { id: 'b' }, score: { conflict_score: 0.74, unresolved_degree: 0.1 } },
+      { pair: { id: 'c' }, score: { conflict_score: 0.2, unresolved_degree: 0.1 } },
+    ])).toEqual([
+      { pair: { id: 'b' }, score: { conflict_score: 0.74, unresolved_degree: 0.1 } },
+    ])
   })
 
   it('builds dossier from topic plus multiple material files', async () => {
@@ -182,12 +195,15 @@ describe('grant deliberation helpers', () => {
     const gptTask = buildOpeningTask({ id: 'gpt', backend: 'codex', display: 'GPT(codex)', role: 'codex-gpt-debater' }, dossier)
 
     expect(geminiTask.prompt).toContain('已知背景：')
+    expect(geminiTask.prompt).toContain('材料 1：材料节选')
     expect(geminiTask.prompt).toContain('只完成一件事：围绕当前议题输出一份 opening JSON。')
     expect(geminiTask.prompt).not.toContain('## 统一 dossier\n完整版')
+    expect(geminiTask.prompt).not.toContain('现场任务调度高度依赖人工经验')
     expect(claudeTask.prompt).toContain('已知背景：')
     expect(claudeTask.prompt).toContain('只完成一件事：围绕当前议题输出一份 opening JSON。')
     expect(claudeTask.prompt).not.toContain('补充材料：')
     expect(claudeTask.prompt).not.toContain('## 统一 dossier\n完整版')
+    expect(claudeTask.prompt).not.toContain('多工种并行作业导致动态冲突频发')
     expect(gptTask.prompt).toContain('## 统一 dossier\n完整版')
   })
 
@@ -242,6 +258,7 @@ describe('grant deliberation helpers', () => {
     expect(reviewTask.prompt).toContain('grant reviewer 评分维度')
     expect(reviewTask.prompt).toContain('立项必要性')
     expect(finalTask.prompt).toContain('阶段：research final synthesis')
+    expect(finalTask.prompt).toContain('执行约束：')
     expect(finalTask.prompt).toContain('不要在最终 JSON 中展开 claim_evidence_alignment 或 reviewer 评分')
   })
 
@@ -416,6 +433,66 @@ describe('grant deliberation helpers', () => {
     expect(resolved.reused).toBe(true)
     expect(resolved.runId).toBe(newerRun)
     expect(resolved.resumePhase).toBe('review')
+  })
+
+  it('skips corrupt checkpoint JSON and falls back to the next valid run', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-research-corrupt-'))
+    tmpDirs.push(tmpDir)
+    const topic = '复杂施工现场协同调度'
+    const corruptRun = buildResearchCheckpointRunDir(tmpDir, topic, 'research', '2026-04-11T12-00-00-000Z-run')
+    const validRun = buildResearchCheckpointRunDir(tmpDir, topic, 'research', '2026-04-11T11-00-00-000Z-run')
+
+    await mkdir(corruptRun, { recursive: true })
+    await writeFile(getResearchCheckpointFilePath(corruptRun, 'openings'), '{bad json', 'utf-8')
+    await writeResearchCheckpoint({
+      checkpointDir: validRun,
+      phase: 'openings',
+      topic,
+      template: 'research',
+      payload: { gemini: {}, claude: {}, gpt: {} },
+    })
+
+    const resolved = await resolveResearchCheckpointSession({
+      cwd: tmpDir,
+      topic,
+      template: 'research',
+      runId: '2026-04-11T13-00-00-000Z-run',
+      mode: 'auto',
+    })
+
+    expect(resolved.runId).toBe('2026-04-11T11-00-00-000Z-run')
+    expect(resolved.resumePhase).toBe('openings')
+  })
+
+  it('caps checkpoint directory scan to the five most recent runs', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-research-scan-cap-'))
+    tmpDirs.push(tmpDir)
+    const topic = 'scan cap topic'
+
+    for (let index = 0; index < 7; index += 1) {
+      const runId = `2026-04-11T1${index}-00-00-000Z-run`
+      const checkpointDir = buildResearchCheckpointRunDir(tmpDir, topic, 'research', runId)
+      await writeResearchCheckpoint({
+        checkpointDir,
+        phase: 'openings',
+        topic,
+        template: 'research',
+        payload: { gemini: {}, claude: {}, gpt: {} },
+      })
+    }
+
+    const newestDir = buildResearchCheckpointRunDir(tmpDir, topic, 'research', '2026-04-11T16-00-00-000Z-run')
+    await writeFile(getResearchCheckpointFilePath(newestDir, 'openings'), '{bad json', 'utf-8')
+
+    const resolved = await resolveResearchCheckpointSession({
+      cwd: tmpDir,
+      topic,
+      template: 'research',
+      runId: '2026-04-11T17-00-00-000Z-run',
+      mode: 'auto',
+    })
+
+    expect(resolved.runId).toBe('2026-04-11T15-00-00-000Z-run')
   })
 
   it('derives resume priority and pending writing stages from available checkpoints', () => {
