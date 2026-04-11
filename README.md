@@ -83,7 +83,8 @@
 
 - `gemini: direct`
 - `claude: direct`
-- `codex: wrapper`
+- `codex-debater: direct`
+- `codex-chair: wrapper/direct-hybrid`
 
 设计原因：
 
@@ -99,8 +100,8 @@
 
 说明：
 
-- `codeagent-wrapper` 仍是最低运行门槛的一部分，因为 `codex` 仍在使用它。
-- 但 `Gemini` / `Claude` 已不再默认经过 wrapper。
+- `codeagent-wrapper` 仍是最低运行门槛的一部分，因为 chair 路径仍在部分阶段使用它。
+- `Gemini` / `Claude` 与 `GPT(codex)` debater 已不再默认经过 wrapper。
 
 ## 快速开始
 
@@ -240,7 +241,8 @@ node scripts/run-grant-deliberation.mjs [options]
 
 - `gemini: direct`
 - `claude: direct`
-- `codex: wrapper`
+- `codex-debater: direct`
+- `codex-chair: wrapper/direct-hybrid`
 
 ## 输出内容
 

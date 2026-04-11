@@ -50,7 +50,8 @@ The current provider strategy is:
 
 - `gemini: direct`
 - `claude: direct`
-- `codex: wrapper`
+- `codex-debater: direct`
+- `codex-chair: wrapper/direct-hybrid`
 
 Why:
 
@@ -66,8 +67,8 @@ Environment variables that still matter:
 
 Notes:
 
-- `codeagent-wrapper` is still part of the minimum runtime because the `codex` path still depends on it.
-- `Gemini` / `Claude` no longer go through the wrapper by default.
+- `codeagent-wrapper` is still part of the minimum runtime because chair stages still depend on it in part of the pipeline.
+- `Gemini` / `Claude` and the `GPT(codex)` debater no longer go through the wrapper by default.
 
 ## Quick Start
 
@@ -190,7 +191,8 @@ The CLI should also print a provider strategy summary at the end of a run or on 
 
 - `gemini: direct`
 - `claude: direct`
-- `codex: wrapper`
+- `codex-debater: direct`
+- `codex-chair: wrapper/direct-hybrid`
 
 ## Output
 

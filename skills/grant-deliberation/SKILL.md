@@ -44,7 +44,7 @@ node scripts/run-grant-deliberation.mjs \
    - 报告路径
    - 当前运行级别（full / partial / minimal）
    - 当前章节模板（research / engineering / 通用）
-   - provider strategy（gemini: direct / claude: direct / codex: wrapper）
+   - provider strategy（gemini: direct / claude: direct / codex-debater: direct / codex-chair: wrapper/direct-hybrid）
    - 最优技术路线
    - 关键科学问题
    - 工程化难点
@@ -72,7 +72,8 @@ node scripts/run-grant-deliberation.mjs \
 
 - `gemini: direct`
 - `claude: direct`
-- `codex: wrapper`
+- `codex-debater: direct`
+- `codex-chair: wrapper/direct-hybrid`
 
 ## 不要做的事
 

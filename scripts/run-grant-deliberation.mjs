@@ -92,7 +92,8 @@ const CHAIR = {
 const PROVIDER_STRATEGY_SUMMARY = [
   'gemini: direct',
   'claude: direct',
-  'codex: wrapper',
+  'codex-debater: direct',
+  'codex-chair: wrapper/direct-hybrid',
 ]
 
 const ROLE_PROMPTS = {
@@ -1463,10 +1464,18 @@ function shouldUseDirectCodexForChair(traceMeta = {}) {
   ].includes(traceMeta.phase)
 }
 
-async function runCodexDirectTask({ prompt, workdir, label, trace, traceMeta, expectJson = true }) {
+function shouldUseDirectCodexForDebater({ backend, actorId }) {
+  return backend === 'codex' && actorId === 'gpt'
+}
+
+async function runCodexDirectTask({ prompt, workdir, label, tracker = null, actorId = '', trace, traceMeta, expectJson = true }) {
   let attempt = 0
   while (attempt < 2) {
     attempt += 1
+    if (tracker && actorId) {
+      tracker.setActorState(actorId, attempt === 1 ? 'running' : 'retrying')
+      tracker.setLatestSignal(actorId, attempt === 1 ? `已启动 ${label}` : `正在重试 ${label}（第 ${attempt} 次）`, true)
+    }
     const promptToSend = buildTracePrompt(trace, traceMeta, prompt)
     const lastMessagePath = path.join(workdir, `.codex-last-${Date.now()}-${attempt}.txt`)
     const args = [
@@ -1514,6 +1523,9 @@ async function runCodexDirectTask({ prompt, workdir, label, trace, traceMeta, ex
 
     const exitCode = await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        if (tracker && actorId) {
+          tracker.setLatestSignal(actorId, `${label} 超时，正在终止`, true)
+        }
         child.kill('SIGTERM')
         setTimeout(() => child.kill('SIGKILL'), 1000).unref?.()
         reject(new Error(`${label} timed out after ${DEFAULT_TASK_TIMEOUT_MS}ms`))
@@ -1550,7 +1562,13 @@ async function runCodexDirectTask({ prompt, workdir, label, trace, traceMeta, ex
         await trace.updateTask(taskTrace, { parse_status: 'process_error' })
       }
       if (attempt < 2) {
+        if (tracker && actorId) {
+          tracker.setLatestSignal(actorId, `${label} 失败，准备重试：exit ${exitCode}`, true)
+        }
         continue
+      }
+      if (tracker && actorId) {
+        tracker.setActorState(actorId, 'failed')
       }
       throw new Error(`${label} failed with exit code ${exitCode}\n${stderr || stdout}`)
     }
@@ -1561,7 +1579,13 @@ async function runCodexDirectTask({ prompt, workdir, label, trace, traceMeta, ex
         await trace.updateTask(taskTrace, { parse_status: 'empty_output' })
       }
       if (attempt < 2) {
+        if (tracker && actorId) {
+          tracker.setLatestSignal(actorId, `${label} 未返回正文，准备重试`, true)
+        }
         continue
+      }
+      if (tracker && actorId) {
+        tracker.setActorState(actorId, 'failed')
       }
       throw new Error(`${label} completed without last message output`)
     }
@@ -1575,12 +1599,22 @@ async function runCodexDirectTask({ prompt, workdir, label, trace, traceMeta, ex
           await trace.updateTask(taskTrace, { parse_status: 'invalid_json' })
         }
         if (attempt < 2) {
+          if (tracker && actorId) {
+            tracker.setLatestSignal(actorId, `${label} 返回了非法 JSON，准备重试`, true)
+          }
           continue
+        }
+        if (tracker && actorId) {
+          tracker.setActorState(actorId, 'failed')
         }
         throw new Error(`${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`)
       }
     }
 
+    if (tracker && actorId) {
+      tracker.setActorState(actorId, 'completed')
+      tracker.setLatestSignal(actorId, `${label} 已完成`, true)
+    }
     if (trace) {
       await trace.updateTask(taskTrace, { parse_status: 'ok' })
       await trace.writeEvent({
@@ -1878,6 +1912,18 @@ async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, t
 async function runWrapperTask({ wrapperPath, backend, prompt, workdir, sessionId = null, label, tracker, actorId, geminiModel, expectJson = true }) {
   const trace = arguments[0].trace
   const traceMeta = arguments[0].traceMeta || {}
+  if (shouldUseDirectCodexForDebater({ backend, actorId })) {
+    return runCodexDirectTask({
+      prompt,
+      workdir,
+      label,
+      tracker,
+      actorId,
+      trace,
+      traceMeta,
+      expectJson,
+    })
+  }
   if (backend === 'gemini') {
     return runGeminiDirectTask({
       prompt,
