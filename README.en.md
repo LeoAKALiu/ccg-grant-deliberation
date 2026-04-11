@@ -40,6 +40,41 @@ node scripts/setup.mjs
 node scripts/doctor.mjs
 ```
 
+## Use in Codex
+
+This repository is already structured as a local Codex plugin. The repo root includes:
+
+- [.codex-plugin/plugin.json](/Users/leo/Projects/ccg-grant-deliberation/.codex-plugin/plugin.json)
+- [skills/grant-deliberation/SKILL.md](/Users/leo/Projects/ccg-grant-deliberation/skills/grant-deliberation/SKILL.md)
+
+Usage:
+
+1. Open this repository in Codex  
+   `/Users/leo/Projects/ccg-grant-deliberation`
+2. Run the local environment checks:
+
+```bash
+node scripts/setup.mjs
+node scripts/doctor.mjs
+```
+
+3. Then either ask Codex to use the plugin skill directly or run the script:
+
+```text
+Use grant-deliberation to review this proposal with the research template.
+```
+
+Or:
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --topic "Evaluate the key scientific questions, engineering bottlenecks, and best technical route for a technology grant proposal" \
+  --material examples/materials/minimal-brief.md
+```
+
+If the environment is not ready, fix the `doctor` output before starting a live run.
+
 Generic report:
 
 ```bash

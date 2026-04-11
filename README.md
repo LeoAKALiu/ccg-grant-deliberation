@@ -40,6 +40,41 @@ node scripts/setup.mjs
 node scripts/doctor.mjs
 ```
 
+## 在 Codex 中使用
+
+本仓库按本地 Codex 插件组织，仓库根目录下已经包含：
+
+- [.codex-plugin/plugin.json](/Users/leo/Projects/ccg-grant-deliberation/.codex-plugin/plugin.json)
+- [skills/grant-deliberation/SKILL.md](/Users/leo/Projects/ccg-grant-deliberation/skills/grant-deliberation/SKILL.md)
+
+使用方式：
+
+1. 在 Codex 中打开这个仓库目录  
+   `/Users/leo/Projects/ccg-grant-deliberation`
+2. 先执行环境检查：
+
+```bash
+node scripts/setup.mjs
+node scripts/doctor.mjs
+```
+
+3. 然后在 Codex 对话里直接提出任务，或显式调用插件 skill：
+
+```text
+请用 grant-deliberation 对这个课题做一轮 research 模板会审
+```
+
+也可以直接让 Codex 运行脚本：
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --topic "论证某科技项目申请书的关键科学问题、工程化难点和最优技术路线" \
+  --material examples/materials/minimal-brief.md
+```
+
+如果环境未就绪，优先看 `doctor` 输出，而不是直接进入 live 运行。
+
 通用报告：
 
 ```bash
