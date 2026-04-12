@@ -40,7 +40,9 @@ node scripts/run-grant-deliberation.mjs \
 2. 收集用户明确给出的材料路径，按 `--material` 传给脚本
 3. 如环境未就绪，先建议运行 `node scripts/setup.mjs` 或 `node scripts/doctor.mjs`
 4. 默认不要改动输出路径；让脚本写到 `reports/ccg-grant-deliberation/<slug>.md`
-5. 如果脚本成功，向用户汇报：
+5. 如用户明确要求保留无限等待，追加 `--task-timeout-ms infinite --run-timeout-ms infinite`
+6. 如用户明确要求更严格防挂死，优先建议显式传入 `--task-timeout-ms` 与 `--run-timeout-ms`
+7. 如果脚本成功，向用户汇报：
    - 报告路径
    - 当前运行级别（full / partial / minimal）
    - 当前章节模板（research / engineering / 通用）
@@ -48,7 +50,7 @@ node scripts/run-grant-deliberation.mjs \
    - 最优技术路线
    - 关键科学问题
    - 工程化难点
-6. 如果脚本失败，向用户汇报失败原因、缺失依赖和下一步命令，不要伪造结论
+8. 如果脚本失败，向用户汇报失败原因、缺失依赖和下一步命令，不要伪造结论
 
 如果用户选择 `--template research`：
 
@@ -60,6 +62,7 @@ node scripts/run-grant-deliberation.mjs \
 - 默认采用收敛版会审路径：先做 pair triage，只围绕最高价值的 1 组分歧进入 focused rebuttal，然后尽快进入 strategist / composer / reviewer / final synthesis
 - 默认启用 checkpoint / resume；优先复用 `.omx/checkpoints/` 下最近一次可恢复的 research 中间产物
 - 用户如需强制重跑，可使用 `--fresh-research`
+- 当某一侧 rebuttal / addendum 失败时，脚本会把该 pair 标记为 `degraded_pair` 并尽量继续后续写作；若双方初始 rebuttal 都失败，则会标记为 `pair_failed`
 - 这些中间步骤只用于内部质量控制，最终仍只向用户展示成品章节与正文
 
 如果用户明确要求排查“provider 是否真的收到编排”：

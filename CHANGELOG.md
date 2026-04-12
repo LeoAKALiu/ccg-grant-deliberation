@@ -6,7 +6,15 @@ The format is intentionally lightweight and release-oriented for GitHub Releases
 
 ## Unreleased
 
-- No unreleased entries yet.
+### Added
+
+- CLI timeout controls: `--task-timeout-ms` and `--run-timeout-ms`, both supporting `infinite`
+
+### Changed
+
+- Rebuttal and addendum failures now degrade a single pair instead of hanging or aborting the entire run
+- Research rebuttal / pair-score prompts now use compacted context to reduce provider-side prompt bloat
+- Trace/task failure metadata now records timeout config, prompt sizes, and structured failure reasons
 
 ## v0.3.0
 

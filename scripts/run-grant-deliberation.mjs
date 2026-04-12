@@ -17,11 +17,16 @@ export const TEMPLATE_OPTIONS = ['research', 'engineering']
 export const ESCALATION_THRESHOLD = 0.72
 export const RESEARCH_MAX_FOCUS_PAIRS = 1
 export const RESEARCH_CHECKPOINT_VERSION = 1
+export const DEFAULT_TASK_TIMEOUT_MS = 180000
+export const DEFAULT_RUN_TIMEOUT_MS = 900000
 const MAX_MATERIAL_CHARS = 8000
 const MATERIAL_SNIPPET_CHARS = 2000
 const PROGRESS_RENDER_INTERVAL_MS = 1800
-const DEFAULT_TASK_TIMEOUT_MS = Number.parseInt(process.env.CCG_TASK_TIMEOUT_MS || '180000', 10)
-const DEFAULT_RUN_TIMEOUT_MS = Number.parseInt(process.env.CCG_RUN_TIMEOUT_MS || '900000', 10)
+const REBUTTAL_MAX_STRING_CHARS = 240
+const REBUTTAL_MAX_ARRAY_ITEMS = 4
+const REBUTTAL_MAX_OBJECT_KEYS = 10
+const REBUTTAL_MAX_MATERIALS = 3
+const REBUTTAL_DOSSIER_SNIPPET_CHARS = 600
 export const RESEARCH_CHECKPOINT_FILE_MAP = {
   openings: 'openings.json',
   'pair-results': 'pair-results.json',
@@ -149,6 +154,8 @@ Options:
   --template <name>      章节模板：research | engineering
   --resume-research      显式从已有 research checkpoint 恢复
   --fresh-research       忽略已有 research checkpoint，从头重跑
+  --task-timeout-ms <n>  单任务超时，毫秒；0 / infinite 表示无限等待
+  --run-timeout-ms <n>   整场运行超时，毫秒；0 / infinite 表示无限等待
   --trace                写入本地 orchestration trace 到 .omx/trace/
   --output <path>        自定义输出路径
   --help                 显示帮助
@@ -200,6 +207,8 @@ export function parseCliArgs(argv) {
     template: '',
     resumeResearch: false,
     freshResearch: false,
+    taskTimeoutMs: undefined,
+    runTimeoutMs: undefined,
     trace: process.env.CCG_TRACE === '1',
     outputPath: '',
     help: false,
@@ -242,6 +251,12 @@ export function parseCliArgs(argv) {
       case '--fresh-research':
         options.freshResearch = true
         break
+      case '--task-timeout-ms':
+        options.taskTimeoutMs = parseTimeoutOption(argv[++i], '--task-timeout-ms')
+        break
+      case '--run-timeout-ms':
+        options.runTimeoutMs = parseTimeoutOption(argv[++i], '--run-timeout-ms')
+        break
       case '--output':
         options.outputPath = argv[++i] || ''
         break
@@ -272,6 +287,207 @@ export function parseCliArgs(argv) {
   }
 
   return options
+}
+
+export function parseTimeoutOption(value, flagName = 'timeout') {
+  if (value === undefined || value === null || value === '') {
+    throw new Error(`${flagName} requires a value`)
+  }
+
+  const normalized = String(value).trim().toLowerCase()
+  if (!normalized) {
+    throw new Error(`${flagName} requires a value`)
+  }
+  if (normalized === 'infinite' || normalized === '0') {
+    return null
+  }
+
+  const parsed = Number.parseInt(normalized, 10)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${flagName} must be a non-negative integer or "infinite"`)
+  }
+  return parsed === 0 ? null : parsed
+}
+
+export function resolveRuntimeConfig(options = {}, env = process.env) {
+  const taskTimeoutMs = options.taskTimeoutMs !== undefined
+    ? options.taskTimeoutMs
+    : parseTimeoutOption(env.CCG_TASK_TIMEOUT_MS || String(DEFAULT_TASK_TIMEOUT_MS), 'CCG_TASK_TIMEOUT_MS')
+  const runTimeoutMs = options.runTimeoutMs !== undefined
+    ? options.runTimeoutMs
+    : parseTimeoutOption(env.CCG_RUN_TIMEOUT_MS || String(DEFAULT_RUN_TIMEOUT_MS), 'CCG_RUN_TIMEOUT_MS')
+
+  return {
+    taskTimeoutMs,
+    runTimeoutMs,
+  }
+}
+
+function formatTimeoutForTrace(timeoutMs) {
+  return timeoutMs === null ? 'infinite' : timeoutMs
+}
+
+function truncatePromptText(text, maxChars) {
+  const normalized = normalizeWhitespace(text)
+  if (!normalized || normalized.length <= maxChars) {
+    return normalized
+  }
+  return `${normalized.slice(0, maxChars)}…（截断）`
+}
+
+function compactPromptValue(value, depth = 0) {
+  if (Array.isArray(value)) {
+    const items = value.slice(0, REBUTTAL_MAX_ARRAY_ITEMS).map(item => compactPromptValue(item, depth + 1))
+    if (value.length > REBUTTAL_MAX_ARRAY_ITEMS) {
+      items.push(`… 其余 ${value.length - REBUTTAL_MAX_ARRAY_ITEMS} 项省略`)
+    }
+    return items
+  }
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value)
+      .slice(0, REBUTTAL_MAX_OBJECT_KEYS)
+      .map(([key, item]) => [key, depth >= 3 ? truncatePromptText(JSON.stringify(item), REBUTTAL_MAX_STRING_CHARS) : compactPromptValue(item, depth + 1)])
+    const compacted = Object.fromEntries(entries)
+    if (Object.keys(value).length > REBUTTAL_MAX_OBJECT_KEYS) {
+      compacted.__truncated__ = `其余 ${Object.keys(value).length - REBUTTAL_MAX_OBJECT_KEYS} 个字段省略`
+    }
+    return compacted
+  }
+
+  if (typeof value === 'string') {
+    return truncatePromptText(value, REBUTTAL_MAX_STRING_CHARS)
+  }
+
+  return value
+}
+
+export function buildCompactResearchDebateDossier(dossier) {
+  const materialLines = (dossier.materials || []).slice(0, REBUTTAL_MAX_MATERIALS).map((item, index) => {
+    const summary = truncatePromptText(item.excerpt || item.summary || '', REBUTTAL_DOSSIER_SNIPPET_CHARS)
+    return `- 材料 ${index + 1}：${summary || '无摘要'}`
+  })
+
+  if ((dossier.materials || []).length > REBUTTAL_MAX_MATERIALS) {
+    materialLines.push(`- 其余 ${(dossier.materials || []).length - REBUTTAL_MAX_MATERIALS} 份材料省略，仅在 opening 阶段已读取`)
+  }
+
+  return [
+    '## 压缩版 debate dossier',
+    `议题：${dossier.topic}`,
+    `输出语言：${dossier.language || DEFAULT_LANGUAGE}`,
+    `聚焦维度：${(dossier.focus || DEFAULT_FOCUS).join('、')}`,
+    `章节模板：${dossier.template || '通用'}`,
+    dossier.materialWarnings?.length ? `材料警告：${dossier.materialWarnings.join('；')}` : '材料警告：无',
+    '材料摘要：',
+    ...(materialLines.length > 0 ? materialLines : ['- 未提供可读材料']),
+  ].join('\n')
+}
+
+function withPromptMetrics(originalPrompt, compactedPrompt) {
+  return {
+    prompt: compactedPrompt,
+    promptMetrics: {
+      originalPromptChars: String(originalPrompt || '').length,
+      compactedPromptChars: String(compactedPrompt || '').length,
+      wasCompacted: String(originalPrompt || '') !== String(compactedPrompt || ''),
+    },
+  }
+}
+
+function createTaskFailure(reason, message, details = {}) {
+  const error = new Error(message)
+  error.failureReason = reason
+  Object.assign(error, details)
+  return error
+}
+
+function normalizeTaskFailure(error, label, details = {}) {
+  if (error && typeof error === 'object' && error.failureReason) {
+    Object.assign(error, details)
+    return error
+  }
+  return createTaskFailure('process_error', `${label} failed\n${String(error instanceof Error ? error.message : error)}`, details)
+}
+
+function getTaskFailureReason(error) {
+  if (error && typeof error === 'object' && error.failureReason) {
+    return error.failureReason
+  }
+  const message = String(error instanceof Error ? error.message : error).toLowerCase()
+  if (message.includes('timed out')) {
+    return 'timeout'
+  }
+  return 'process_error'
+}
+
+export function buildFailedTurnPayload(result) {
+  return {
+    status: result.status,
+    provider: result.provider,
+    phase: result.phase,
+    pair: result.pair,
+    failure_reason: result.failure_reason,
+    error_summary: result.error_summary,
+  }
+}
+
+function summarizeTaskStatuses(statusMap = {}) {
+  return Object.values(statusMap).filter(status => status && status !== 'success')
+}
+
+export function buildPairFailureReason(stage, statusMap = {}) {
+  const failures = summarizeTaskStatuses(statusMap)
+  if (failures.length === 0) {
+    return ''
+  }
+  const unique = [...new Set(failures)]
+  if (failures.length === Object.keys(statusMap).length) {
+    return `all_${stage}_failed:${unique.join('+')}`
+  }
+  return `partial_${stage}_failure:${unique.join('+')}`
+}
+
+export function buildSyntheticPairScore(pair, failureReason, stage) {
+  return {
+    pair: pair.id,
+    conflict_score: 0,
+    unresolved_degree: 1,
+    decision_status: 'settled',
+    key_tensions: [`${stage} 未完成，无法形成完整交叉质询`],
+    chair_questions: [],
+    provisional_winner: 'tie',
+    degraded_pair: true,
+    pair_failed: true,
+    failure_reason: failureReason,
+  }
+}
+
+async function waitForChildProcess({ child, label, timeoutMs, onTimeout }) {
+  return await new Promise((resolve, reject) => {
+    let timeout = null
+    if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+      timeout = setTimeout(() => {
+        onTimeout?.()
+        child.kill('SIGTERM')
+        setTimeout(() => child.kill('SIGKILL'), 1000).unref?.()
+        reject(createTaskFailure('timeout', `${label} timed out after ${timeoutMs}ms`, { timeoutMs }))
+      }, timeoutMs)
+    }
+
+    child.on('error', (error) => {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+      reject(error)
+    })
+    child.on('close', (code) => {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+      resolve(code)
+    })
+  })
 }
 
 export function buildResearchCheckpointTopicDir(cwd, topic, template = 'research') {
@@ -705,7 +921,14 @@ export function renderMarkdownReport({ dossier, finalSummary, pairResults, escal
   }
   else {
     summarizedPairs.forEach((pair) => {
-      lines.push(`- ${pair.score.pair}: conflict=${pair.score.conflict_score}, unresolved=${pair.score.unresolved_degree}, status=${pair.score.decision_status}`)
+      const tags = [
+        pair.degraded_pair || pair.score?.degraded_pair ? 'degraded' : '',
+        pair.pair_failed || pair.score?.pair_failed ? 'pair_failed' : '',
+      ].filter(Boolean)
+      const suffix = pair.failure_reason || pair.score?.failure_reason
+        ? `, failure=${pair.failure_reason || pair.score?.failure_reason}`
+        : ''
+      lines.push(`- ${pair.score?.pair || pair.pair?.id || 'unknown'}: conflict=${pair.score?.conflict_score ?? 'n/a'}, unresolved=${pair.score?.unresolved_degree ?? 'n/a'}, status=${pair.score?.decision_status || 'unknown'}${tags.length > 0 ? `, flags=${tags.join('|')}` : ''}${suffix}`)
     })
   }
 
@@ -979,25 +1202,45 @@ export function buildRebuttalTask(pair, sourceActor, targetActor, dossier, openi
   "confidence": 0
 }`
 
-  return {
-    backend: sourceActor.backend,
-    role: sourceActor.role,
-    resumeSession: null,
-    prompt: [
+  const originalPrompt = [
+    ROLE_PROMPTS[sourceActor.role].trim(),
+    '',
+    EXECUTION_GUARDRAILS,
+    '',
+    dossier.dossierText,
+    '',
+    `阶段：交叉质询`,
+    `Pair：${pair.id}`,
+    `你的原始 memo：${JSON.stringify(openings[sourceActor.id], null, 2)}`,
+    `对方 memo：${JSON.stringify(openings[targetActor.id], null, 2)}`,
+    challenge ? `主席追问：${challenge}` : '主席追问：无',
+    '任务：对对方 memo 做结构化反驳，同时明确承认哪些点成立，以及你是否调整路线判断。',
+    buildJsonInstruction(schema),
+  ].join('\n')
+
+  const prompt = dossier.template === 'research'
+    ? [
       ROLE_PROMPTS[sourceActor.role].trim(),
       '',
       EXECUTION_GUARDRAILS,
       '',
-      dossier.dossierText,
+      buildCompactResearchDebateDossier(dossier),
       '',
       `阶段：交叉质询`,
       `Pair：${pair.id}`,
-      `你的原始 memo：${JSON.stringify(openings[sourceActor.id], null, 2)}`,
-      `对方 memo：${JSON.stringify(openings[targetActor.id], null, 2)}`,
+      `你的原始 memo（压缩版）：${JSON.stringify(compactPromptValue(openings[sourceActor.id]), null, 2)}`,
+      `对方 memo（压缩版）：${JSON.stringify(compactPromptValue(openings[targetActor.id]), null, 2)}`,
       challenge ? `主席追问：${challenge}` : '主席追问：无',
       '任务：对对方 memo 做结构化反驳，同时明确承认哪些点成立，以及你是否调整路线判断。',
       buildJsonInstruction(schema),
-    ].join('\n'),
+    ].join('\n')
+    : originalPrompt
+
+  return {
+    backend: sourceActor.backend,
+    role: sourceActor.role,
+    resumeSession: null,
+    ...withPromptMetrics(originalPrompt, prompt),
   }
 }
 
@@ -1009,31 +1252,61 @@ export function buildPairScoreTask(pair, dossier, openings, rebuttals, addendum 
   "decision_status": "settled|needs_addendum",
   "key_tensions": ["关键冲突点"],
   "chair_questions": ["若需加赛，要追问的问题"],
-  "provisional_winner": "${pair.participants[0]}|${pair.participants[1]}|tie"
+  "provisional_winner": "${pair.participants[0]}|${pair.participants[1]}|tie",
+  "degraded_pair": false,
+  "pair_failed": false,
+  "failure_reason": ""
 }`
+
+  const originalPrompt = [
+    ROLE_PROMPTS[CHAIR.role].trim(),
+    '',
+    EXECUTION_GUARDRAILS,
+    '',
+    dossier.dossierText,
+    '',
+    `阶段：Pair 会审`,
+    `Pair：${pair.id}`,
+    `双方 opening memo：${JSON.stringify({
+      [pair.participants[0]]: openings[pair.participants[0]],
+      [pair.participants[1]]: openings[pair.participants[1]],
+    }, null, 2)}`,
+    `双方 rebuttal：${JSON.stringify(rebuttals, null, 2)}`,
+    addendum ? `加赛 rebuttal：${JSON.stringify(addendum, null, 2)}` : '加赛 rebuttal：无',
+    '任务：给出 conflict_score 与 unresolved_degree（0 到 1），并判断该 pair 是否需要加赛。',
+    '若输入中有 rebuttal/addendum 缺席、失败或超时，必须将 degraded_pair 设为 true，并在 failure_reason 中说明该不完整性。',
+    '若双方初始 rebuttal 都失败，则将 pair_failed 设为 true，并按 openings-only 的保守证据标准输出。',
+    buildJsonInstruction(schema),
+  ].join('\n')
+
+  const prompt = dossier.template === 'research'
+    ? [
+      ROLE_PROMPTS[CHAIR.role].trim(),
+      '',
+      EXECUTION_GUARDRAILS,
+      '',
+      buildCompactResearchDebateDossier(dossier),
+      '',
+      `阶段：Pair 会审`,
+      `Pair：${pair.id}`,
+      `双方 opening memo（压缩版）：${JSON.stringify({
+        [pair.participants[0]]: compactPromptValue(openings[pair.participants[0]]),
+        [pair.participants[1]]: compactPromptValue(openings[pair.participants[1]]),
+      }, null, 2)}`,
+      `双方 rebuttal：${JSON.stringify(rebuttals, null, 2)}`,
+      addendum ? `加赛 rebuttal：${JSON.stringify(addendum, null, 2)}` : '加赛 rebuttal：无',
+      '任务：给出 conflict_score 与 unresolved_degree（0 到 1），并判断该 pair 是否需要加赛。',
+      '若输入中有 rebuttal/addendum 缺席、失败或超时，必须将 degraded_pair 设为 true，并在 failure_reason 中说明该不完整性。',
+      '若双方初始 rebuttal 都失败，则将 pair_failed 设为 true，并按 openings-only 的保守证据标准输出。',
+      buildJsonInstruction(schema),
+    ].join('\n')
+    : originalPrompt
 
   return {
     backend: CHAIR.backend,
     role: CHAIR.role,
     resumeSession: null,
-    prompt: [
-      ROLE_PROMPTS[CHAIR.role].trim(),
-      '',
-      EXECUTION_GUARDRAILS,
-      '',
-      dossier.dossierText,
-      '',
-      `阶段：Pair 会审`,
-      `Pair：${pair.id}`,
-      `双方 opening memo：${JSON.stringify({
-        [pair.participants[0]]: openings[pair.participants[0]],
-        [pair.participants[1]]: openings[pair.participants[1]],
-      }, null, 2)}`,
-      `双方 rebuttal：${JSON.stringify(rebuttals, null, 2)}`,
-      addendum ? `加赛 rebuttal：${JSON.stringify(addendum, null, 2)}` : '加赛 rebuttal：无',
-      '任务：给出 conflict_score 与 unresolved_degree（0 到 1），并判断该 pair 是否需要加赛。',
-      buildJsonInstruction(schema),
-    ].join('\n'),
+    ...withPromptMetrics(originalPrompt, prompt),
   }
 }
 
@@ -1093,6 +1366,7 @@ export function buildFinalSynthesisTask(dossier, openings, pairResults, escalate
       `章节模板：${dossier.template || '通用'}`,
       templateInstruction,
       '任务：输出最终会审结论，不要保留模糊折中。必须给出最优路线、淘汰理由、证据缺口和申报书可用表述。',
+      '若 pairResults 中包含 degraded_pair / pair_failed / failure_reason，必须把这些不完整环节视为证据风险，并在证据缺口或主席总结中明确说明。',
       buildJsonInstruction(schema),
     ].join('\n'),
   }
@@ -1321,6 +1595,7 @@ export function buildResearchFinalSynthesisTask(dossier, openings, pairResults, 
       `research reviewer result：${JSON.stringify(reviewResult, null, 2)}`,
       buildResearchTemplateWritingGuidance(),
       '任务：吸收 strategy / claim-evidence / reviewer 修订意见，输出最终 research 成稿。',
+      '若 Pair 会审结果中存在 degraded_pair / pair_failed / failure_reason，必须把这些不完整环节转写为 evidence_gaps 或 chair_summary 中的风险说明。',
       '不要在最终 JSON 中展开 claim_evidence_alignment 或 reviewer 评分，只输出对用户可见的最终内容。',
       buildJsonInstruction(schema),
     ].join('\n'),
@@ -1449,6 +1724,32 @@ function buildTracePrompt(trace, traceMeta, prompt) {
   ].join('\n')
 }
 
+function buildTaskTraceRecord({ traceMeta = {}, prompt, promptToSend, args, workdir, label, backend, provider, phase, attempt, taskTimeoutMs, extra = {} }) {
+  const promptMetrics = traceMeta.promptMetrics || {}
+  return {
+    phase: phase || traceMeta.phase || 'unknown',
+    provider: provider || traceMeta.provider || 'unknown',
+    label,
+    backend,
+    attempt,
+    prompt: promptToSend,
+    args,
+    workdir,
+    sessionId: '',
+    stdout: '',
+    stderr: '',
+    exit_code: null,
+    parse_status: 'started',
+    pair: traceMeta.pair || '',
+    timeout_ms: formatTimeoutForTrace(taskTimeoutMs),
+    prompt_chars: String(promptToSend || '').length,
+    prompt_chars_original: promptMetrics.originalPromptChars ?? String(prompt || '').length,
+    prompt_chars_compacted: promptMetrics.compactedPromptChars ?? String(prompt || '').length,
+    prompt_compacted: Boolean(promptMetrics.wasCompacted),
+    ...extra,
+  }
+}
+
 function buildClaudeDirectArgs() {
   return [
     '-p',
@@ -1485,8 +1786,9 @@ function shouldUseDirectCodexForDebater({ backend, actorId }) {
   return backend === 'codex' && actorId === 'gpt'
 }
 
-async function runCodexDirectTask({ prompt, workdir, label, tracker = null, actorId = '', trace, traceMeta, expectJson = true }) {
+async function runCodexDirectTask({ prompt, workdir, label, tracker = null, actorId = '', trace, traceMeta, expectJson = true, taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS }) {
   let attempt = 0
+  let lastError = null
   while (attempt < 2) {
     attempt += 1
     if (tracker && actorId) {
@@ -1507,22 +1809,22 @@ async function runCodexDirectTask({ prompt, workdir, label, tracker = null, acto
       '-',
     ]
     const taskTrace = trace
-      ? await trace.writeTask({
-          phase: traceMeta.phase || 'chair',
-          provider: traceMeta.provider || CHAIR.display,
-          label,
-          backend: 'codex-direct',
-          attempt,
-          prompt: promptToSend,
+      ? await trace.writeTask(buildTaskTraceRecord({
+          traceMeta,
+          prompt,
+          promptToSend,
           args,
           workdir,
-          sessionId: '',
-          stdout: '',
-          stderr: '',
-          exit_code: null,
-          parse_status: 'started',
-          output_last_message_path: lastMessagePath,
-        })
+          label,
+          backend: 'codex-direct',
+          provider: traceMeta?.provider || CHAIR.display,
+          phase: traceMeta?.phase || 'chair',
+          attempt,
+          taskTimeoutMs,
+          extra: {
+            output_last_message_path: lastMessagePath,
+          },
+        }))
       : ''
 
     const child = spawn('codex', args, {
@@ -1538,24 +1840,53 @@ async function runCodexDirectTask({ prompt, workdir, label, tracker = null, acto
     child.stdin.write(promptToSend)
     child.stdin.end()
 
-    const exitCode = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+    let exitCode
+    try {
+      exitCode = await waitForChildProcess({
+        child,
+        label,
+        timeoutMs: taskTimeoutMs,
+        onTimeout: () => {
+          if (tracker && actorId) {
+            tracker.setLatestSignal(actorId, `${label} 超时，正在终止`, true)
+          }
+        },
+      })
+    }
+    catch (error) {
+      const stdout = stdoutChunks.join('')
+      const stderr = stderrChunks.join('')
+      const failure = normalizeTaskFailure(error, label, { stdout, stderr, timeoutMs: taskTimeoutMs })
+      lastError = failure
+      if (trace) {
+        await trace.updateTask(taskTrace, {
+          stdout,
+          stderr,
+          exit_code: null,
+          parse_status: getTaskFailureReason(failure),
+          failure_reason: getTaskFailureReason(failure),
+        })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'chair',
+          provider: traceMeta.provider || CHAIR.display,
+          label,
+          attempt,
+          reason: getTaskFailureReason(failure),
+          task_file: taskTrace,
+        })
+      }
+      if (attempt < 2) {
         if (tracker && actorId) {
-          tracker.setLatestSignal(actorId, `${label} 超时，正在终止`, true)
+          tracker.setLatestSignal(actorId, `${label} ${getTaskFailureReason(failure)}，准备重试`, true)
         }
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 1000).unref?.()
-        reject(new Error(`${label} timed out after ${DEFAULT_TASK_TIMEOUT_MS}ms`))
-      }, DEFAULT_TASK_TIMEOUT_MS)
-      child.on('error', (error) => {
-        clearTimeout(timeout)
-        reject(error)
-      })
-      child.on('close', (code) => {
-        clearTimeout(timeout)
-        resolve(code)
-      })
-    })
+        continue
+      }
+      if (tracker && actorId) {
+        tracker.setActorState(actorId, 'failed')
+      }
+      throw failure
+    }
 
     const stdout = stdoutChunks.join('')
     const stderr = stderrChunks.join('')
@@ -1575,8 +1906,19 @@ async function runCodexDirectTask({ prompt, workdir, label, tracker = null, acto
     }
 
     if (exitCode !== 0) {
+      const failure = createTaskFailure('process_error', `${label} failed with exit code ${exitCode}\n${stderr || stdout}`, { exitCode, stdout, stderr })
+      lastError = failure
       if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'process_error' })
+        await trace.updateTask(taskTrace, { parse_status: 'process_error', failure_reason: 'process_error' })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'chair',
+          provider: traceMeta.provider || CHAIR.display,
+          label,
+          attempt,
+          reason: 'process_error',
+          task_file: taskTrace,
+        })
       }
       if (attempt < 2) {
         if (tracker && actorId) {
@@ -1587,13 +1929,24 @@ async function runCodexDirectTask({ prompt, workdir, label, tracker = null, acto
       if (tracker && actorId) {
         tracker.setActorState(actorId, 'failed')
       }
-      throw new Error(`${label} failed with exit code ${exitCode}\n${stderr || stdout}`)
+      throw failure
     }
 
     const message = String(lastMessage || '').trim()
     if (!message) {
+      const failure = createTaskFailure('empty_output', `${label} completed without last message output`, { stdout, stderr, exitCode })
+      lastError = failure
       if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'empty_output' })
+        await trace.updateTask(taskTrace, { parse_status: 'empty_output', failure_reason: 'empty_output' })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'chair',
+          provider: traceMeta.provider || CHAIR.display,
+          label,
+          attempt,
+          reason: 'empty_output',
+          task_file: taskTrace,
+        })
       }
       if (attempt < 2) {
         if (tracker && actorId) {
@@ -1604,7 +1957,7 @@ async function runCodexDirectTask({ prompt, workdir, label, tracker = null, acto
       if (tracker && actorId) {
         tracker.setActorState(actorId, 'failed')
       }
-      throw new Error(`${label} completed without last message output`)
+      throw failure
     }
 
     if (expectJson) {
@@ -1612,8 +1965,19 @@ async function runCodexDirectTask({ prompt, workdir, label, tracker = null, acto
         extractJsonPayload(message)
       }
       catch (error) {
+        const failure = createTaskFailure('invalid_json', `${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`, { stdout, stderr, lastMessage: message })
+        lastError = failure
         if (trace) {
-          await trace.updateTask(taskTrace, { parse_status: 'invalid_json' })
+          await trace.updateTask(taskTrace, { parse_status: 'invalid_json', failure_reason: 'invalid_json' })
+          await trace.writeEvent({
+            type: 'provider_failure',
+            phase: traceMeta.phase || 'chair',
+            provider: traceMeta.provider || CHAIR.display,
+            label,
+            attempt,
+            reason: 'invalid_json',
+            task_file: taskTrace,
+          })
         }
         if (attempt < 2) {
           if (tracker && actorId) {
@@ -1624,7 +1988,7 @@ async function runCodexDirectTask({ prompt, workdir, label, tracker = null, acto
         if (tracker && actorId) {
           tracker.setActorState(actorId, 'failed')
         }
-        throw new Error(`${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`)
+        throw failure
       }
     }
 
@@ -1652,11 +2016,12 @@ async function runCodexDirectTask({ prompt, workdir, label, tracker = null, acto
     }
   }
 
-  throw new Error(`${label} exhausted retries`)
+  throw lastError || createTaskFailure('process_error', `${label} exhausted retries`)
 }
 
-async function runClaudeDirectTask({ prompt, workdir, label, tracker, actorId, trace, traceMeta, expectJson = true }) {
+async function runClaudeDirectTask({ prompt, workdir, label, tracker, actorId, trace, traceMeta, expectJson = true, taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS }) {
   let attempt = 0
+  let lastError = null
   while (attempt < 2) {
     attempt += 1
     tracker.setActorState(actorId, attempt === 1 ? 'running' : 'retrying')
@@ -1665,21 +2030,19 @@ async function runClaudeDirectTask({ prompt, workdir, label, tracker, actorId, t
     const args = buildClaudeDirectArgs()
     const promptToSend = buildTracePrompt(trace, traceMeta, prompt)
     const taskTrace = trace
-      ? await trace.writeTask({
-          phase: traceMeta.phase || 'wrapper',
-          provider: traceMeta.provider || actorId || 'claude',
-          label,
-          backend: 'claude-direct',
-          attempt,
-          prompt: promptToSend,
+      ? await trace.writeTask(buildTaskTraceRecord({
+          traceMeta,
+          prompt,
+          promptToSend,
           args,
           workdir,
-          sessionId: '',
-          stdout: '',
-          stderr: '',
-          exit_code: null,
-          parse_status: 'started',
-        })
+          label,
+          backend: 'claude-direct',
+          provider: traceMeta?.provider || actorId || 'claude',
+          phase: traceMeta?.phase || 'wrapper',
+          attempt,
+          taskTimeoutMs,
+        }))
       : ''
 
     const child = spawn('claude', args, {
@@ -1697,22 +2060,45 @@ async function runClaudeDirectTask({ prompt, workdir, label, tracker, actorId, t
     child.stdin.write(promptToSend)
     child.stdin.end()
 
-    const exitCode = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        tracker.setLatestSignal(actorId, `${label} 超时，正在终止`, true)
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 1000).unref?.()
-        reject(new Error(`${label} timed out after ${DEFAULT_TASK_TIMEOUT_MS}ms`))
-      }, DEFAULT_TASK_TIMEOUT_MS)
-      child.on('error', (error) => {
-        clearTimeout(timeout)
-        reject(error)
+    let exitCode
+    try {
+      exitCode = await waitForChildProcess({
+        child,
+        label,
+        timeoutMs: taskTimeoutMs,
+        onTimeout: () => tracker.setLatestSignal(actorId, `${label} 超时，正在终止`, true),
       })
-      child.on('close', (code) => {
-        clearTimeout(timeout)
-        resolve(code)
-      })
-    })
+    }
+    catch (error) {
+      const stdout = stdoutChunks.join('')
+      const stderr = stderrChunks.join('')
+      const failure = normalizeTaskFailure(error, label, { stdout, stderr, timeoutMs: taskTimeoutMs })
+      lastError = failure
+      if (trace) {
+        await trace.updateTask(taskTrace, {
+          stdout,
+          stderr,
+          exit_code: null,
+          parse_status: getTaskFailureReason(failure),
+          failure_reason: getTaskFailureReason(failure),
+        })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'wrapper',
+          provider: traceMeta.provider || actorId || 'claude',
+          label,
+          attempt,
+          reason: getTaskFailureReason(failure),
+          task_file: taskTrace,
+        })
+      }
+      if (attempt < 2) {
+        tracker.setLatestSignal(actorId, `${label} ${getTaskFailureReason(failure)}，准备重试`, true)
+        continue
+      }
+      tracker.setActorState(actorId, 'failed')
+      throw failure
+    }
 
     const stdout = stdoutChunks.join('')
     const stderr = stderrChunks.join('')
@@ -1725,28 +2111,50 @@ async function runClaudeDirectTask({ prompt, workdir, label, tracker, actorId, t
     }
 
     if (exitCode !== 0) {
+      const failure = createTaskFailure('process_error', `${label} failed with exit code ${exitCode}\n${stderr || stdout}`, { exitCode, stdout, stderr })
+      lastError = failure
       if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'process_error' })
+        await trace.updateTask(taskTrace, { parse_status: 'process_error', failure_reason: 'process_error' })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'wrapper',
+          provider: traceMeta.provider || actorId || 'claude',
+          label,
+          attempt,
+          reason: 'process_error',
+          task_file: taskTrace,
+        })
       }
       if (attempt < 2) {
         tracker.setLatestSignal(actorId, `${label} 失败，准备重试：exit ${exitCode}`, true)
         continue
       }
       tracker.setActorState(actorId, 'failed')
-      throw new Error(`${label} failed with exit code ${exitCode}\n${stderr || stdout}`)
+      throw failure
     }
 
     const message = String(stdout || '').trim()
     if (!message) {
+      const failure = createTaskFailure('empty_output', `${label} completed without message output`, { stdout, stderr, exitCode })
+      lastError = failure
       if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'empty_output' })
+        await trace.updateTask(taskTrace, { parse_status: 'empty_output', failure_reason: 'empty_output' })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'wrapper',
+          provider: traceMeta.provider || actorId || 'claude',
+          label,
+          attempt,
+          reason: 'empty_output',
+          task_file: taskTrace,
+        })
       }
       if (attempt < 2) {
         tracker.setLatestSignal(actorId, `${label} 未返回正文，准备重试`, true)
         continue
       }
       tracker.setActorState(actorId, 'failed')
-      throw new Error(`${label} completed without message output`)
+      throw failure
     }
 
     if (expectJson) {
@@ -1754,15 +2162,26 @@ async function runClaudeDirectTask({ prompt, workdir, label, tracker, actorId, t
         extractJsonPayload(message)
       }
       catch (error) {
+        const failure = createTaskFailure('invalid_json', `${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`, { stdout, stderr, lastMessage: message })
+        lastError = failure
         if (trace) {
-          await trace.updateTask(taskTrace, { parse_status: 'invalid_json' })
+          await trace.updateTask(taskTrace, { parse_status: 'invalid_json', failure_reason: 'invalid_json' })
+          await trace.writeEvent({
+            type: 'provider_failure',
+            phase: traceMeta.phase || 'wrapper',
+            provider: traceMeta.provider || actorId || 'claude',
+            label,
+            attempt,
+            reason: 'invalid_json',
+            task_file: taskTrace,
+          })
         }
         if (attempt < 2) {
           tracker.setLatestSignal(actorId, `${label} 返回了非法 JSON，准备重试`, true)
           continue
         }
         tracker.setActorState(actorId, 'failed')
-        throw new Error(`${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`)
+        throw failure
       }
     }
 
@@ -1788,11 +2207,12 @@ async function runClaudeDirectTask({ prompt, workdir, label, tracker, actorId, t
     }
   }
 
-  throw new Error(`${label} exhausted retries`)
+  throw lastError || createTaskFailure('process_error', `${label} exhausted retries`)
 }
 
-async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, trace, traceMeta, geminiModel = '', expectJson = true }) {
+async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, trace, traceMeta, geminiModel = '', expectJson = true, taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS }) {
   let attempt = 0
+  let lastError = null
   while (attempt < 2) {
     attempt += 1
     tracker.setActorState(actorId, attempt === 1 ? 'running' : 'retrying')
@@ -1801,21 +2221,19 @@ async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, t
     const promptToSend = buildTracePrompt(trace, traceMeta, prompt)
     const args = buildGeminiDirectArgs(geminiModel)
     const taskTrace = trace
-      ? await trace.writeTask({
-          phase: traceMeta.phase || 'wrapper',
-          provider: traceMeta.provider || actorId || 'gemini',
-          label,
-          backend: 'gemini-direct',
-          attempt,
-          prompt: promptToSend,
+      ? await trace.writeTask(buildTaskTraceRecord({
+          traceMeta,
+          prompt,
+          promptToSend,
           args,
           workdir,
-          sessionId: '',
-          stdout: '',
-          stderr: '',
-          exit_code: null,
-          parse_status: 'started',
-        })
+          label,
+          backend: 'gemini-direct',
+          provider: traceMeta?.provider || actorId || 'gemini',
+          phase: traceMeta?.phase || 'wrapper',
+          attempt,
+          taskTimeoutMs,
+        }))
       : ''
 
     const child = spawn('gemini', args, {
@@ -1832,22 +2250,45 @@ async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, t
     child.stdin.write(promptToSend)
     child.stdin.end()
 
-    const exitCode = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        tracker.setLatestSignal(actorId, `${label} 超时，正在终止`, true)
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 1000).unref?.()
-        reject(new Error(`${label} timed out after ${DEFAULT_TASK_TIMEOUT_MS}ms`))
-      }, DEFAULT_TASK_TIMEOUT_MS)
-      child.on('error', (error) => {
-        clearTimeout(timeout)
-        reject(error)
+    let exitCode
+    try {
+      exitCode = await waitForChildProcess({
+        child,
+        label,
+        timeoutMs: taskTimeoutMs,
+        onTimeout: () => tracker.setLatestSignal(actorId, `${label} 超时，正在终止`, true),
       })
-      child.on('close', (code) => {
-        clearTimeout(timeout)
-        resolve(code)
-      })
-    })
+    }
+    catch (error) {
+      const stdout = stdoutChunks.join('')
+      const stderr = stderrChunks.join('')
+      const failure = normalizeTaskFailure(error, label, { stdout, stderr, timeoutMs: taskTimeoutMs })
+      lastError = failure
+      if (trace) {
+        await trace.updateTask(taskTrace, {
+          stdout,
+          stderr,
+          exit_code: null,
+          parse_status: getTaskFailureReason(failure),
+          failure_reason: getTaskFailureReason(failure),
+        })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'wrapper',
+          provider: traceMeta.provider || actorId || 'gemini',
+          label,
+          attempt,
+          reason: getTaskFailureReason(failure),
+          task_file: taskTrace,
+        })
+      }
+      if (attempt < 2) {
+        tracker.setLatestSignal(actorId, `${label} ${getTaskFailureReason(failure)}，准备重试`, true)
+        continue
+      }
+      tracker.setActorState(actorId, 'failed')
+      throw failure
+    }
 
     const stdout = stdoutChunks.join('')
     const stderr = stderrChunks.join('')
@@ -1860,28 +2301,50 @@ async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, t
     }
 
     if (exitCode !== 0) {
+      const failure = createTaskFailure('process_error', `${label} failed with exit code ${exitCode}\n${stderr || stdout}`, { exitCode, stdout, stderr })
+      lastError = failure
       if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'process_error' })
+        await trace.updateTask(taskTrace, { parse_status: 'process_error', failure_reason: 'process_error' })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'wrapper',
+          provider: traceMeta.provider || actorId || 'gemini',
+          label,
+          attempt,
+          reason: 'process_error',
+          task_file: taskTrace,
+        })
       }
       if (attempt < 2) {
         tracker.setLatestSignal(actorId, `${label} 失败，准备重试：exit ${exitCode}`, true)
         continue
       }
       tracker.setActorState(actorId, 'failed')
-      throw new Error(`${label} failed with exit code ${exitCode}\n${stderr || stdout}`)
+      throw failure
     }
 
     const message = String(stdout || '').trim()
     if (!message) {
+      const failure = createTaskFailure('empty_output', `${label} completed without message output\n${stderr}`, { stdout, stderr, exitCode })
+      lastError = failure
       if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'empty_output' })
+        await trace.updateTask(taskTrace, { parse_status: 'empty_output', failure_reason: 'empty_output' })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'wrapper',
+          provider: traceMeta.provider || actorId || 'gemini',
+          label,
+          attempt,
+          reason: 'empty_output',
+          task_file: taskTrace,
+        })
       }
       if (attempt < 2) {
         tracker.setLatestSignal(actorId, `${label} 未返回正文，准备重试`, true)
         continue
       }
       tracker.setActorState(actorId, 'failed')
-      throw new Error(`${label} completed without message output\n${stderr}`)
+      throw failure
     }
 
     if (expectJson) {
@@ -1889,15 +2352,26 @@ async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, t
         extractJsonPayload(message)
       }
       catch (error) {
+        const failure = createTaskFailure('invalid_json', `${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}\n${stderr}`, { stdout, stderr, lastMessage: message })
+        lastError = failure
         if (trace) {
-          await trace.updateTask(taskTrace, { parse_status: 'invalid_json' })
+          await trace.updateTask(taskTrace, { parse_status: 'invalid_json', failure_reason: 'invalid_json' })
+          await trace.writeEvent({
+            type: 'provider_failure',
+            phase: traceMeta.phase || 'wrapper',
+            provider: traceMeta.provider || actorId || 'gemini',
+            label,
+            attempt,
+            reason: 'invalid_json',
+            task_file: taskTrace,
+          })
         }
         if (attempt < 2) {
           tracker.setLatestSignal(actorId, `${label} 返回了非法 JSON，准备重试`, true)
           continue
         }
         tracker.setActorState(actorId, 'failed')
-        throw new Error(`${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}\n${stderr}`)
+        throw failure
       }
     }
 
@@ -1923,10 +2397,10 @@ async function runGeminiDirectTask({ prompt, workdir, label, tracker, actorId, t
     }
   }
 
-  throw new Error(`${label} exhausted retries`)
+  throw lastError || createTaskFailure('process_error', `${label} exhausted retries`)
 }
 
-async function runWrapperTask({ backend, prompt, workdir, label, tracker, actorId, geminiModel, expectJson = true, trace, traceMeta = {} }) {
+async function runWrapperTask({ backend, prompt, workdir, label, tracker, actorId, geminiModel, expectJson = true, trace, traceMeta = {}, taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS }) {
   if (shouldUseDirectCodexForDebater({ backend, actorId })) {
     return runCodexDirectTask({
       prompt,
@@ -1937,6 +2411,7 @@ async function runWrapperTask({ backend, prompt, workdir, label, tracker, actorI
       trace,
       traceMeta,
       expectJson,
+      taskTimeoutMs,
     })
   }
   if (backend === 'gemini') {
@@ -1950,6 +2425,7 @@ async function runWrapperTask({ backend, prompt, workdir, label, tracker, actorI
       traceMeta,
       geminiModel,
       expectJson,
+      taskTimeoutMs,
     })
   }
   if (backend === 'claude') {
@@ -1962,12 +2438,13 @@ async function runWrapperTask({ backend, prompt, workdir, label, tracker, actorI
       trace,
       traceMeta,
       expectJson,
+      taskTimeoutMs,
     })
   }
   throw new Error(`Unsupported debater dispatch: backend=${backend}, actorId=${actorId || 'unknown'}`)
 }
 
-async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, expectJson = true, trace, traceMeta = {} }) {
+async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, expectJson = true, trace, traceMeta = {}, taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS }) {
   if (shouldUseDirectCodexForChair(traceMeta)) {
     return runCodexDirectTask({
       prompt,
@@ -1976,6 +2453,7 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
       trace,
       traceMeta,
       expectJson,
+      taskTimeoutMs,
     })
   }
   const args = ['--progress', '--backend', CHAIR.backend, '-', workdir]
@@ -1984,25 +2462,24 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
   }
 
   let attempt = 0
+  let lastError = null
   while (attempt < 2) {
     attempt += 1
     const promptToSend = buildTracePrompt(trace, traceMeta, prompt)
     const taskTrace = trace
-      ? await trace.writeTask({
-          phase: traceMeta.phase || 'chair',
-          provider: traceMeta.provider || CHAIR.display,
-          label,
-          backend: CHAIR.backend,
-          attempt,
-          prompt: promptToSend,
+      ? await trace.writeTask(buildTaskTraceRecord({
+          traceMeta,
+          prompt,
+          promptToSend,
           args,
           workdir,
-          sessionId: '',
-          stdout: '',
-          stderr: '',
-          exit_code: null,
-          parse_status: 'started',
-        })
+          label,
+          backend: CHAIR.backend,
+          provider: traceMeta?.provider || CHAIR.display,
+          phase: traceMeta?.phase || 'chair',
+          attempt,
+          taskTimeoutMs,
+        }))
       : ''
     const child = spawn(wrapperPath, args, {
       cwd: workdir,
@@ -2024,22 +2501,42 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
     child.stdin.write(promptToSend)
     child.stdin.end()
 
-    const exitCode = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 1000).unref?.()
-        reject(new Error(`${label} timed out after ${DEFAULT_TASK_TIMEOUT_MS}ms`))
-      }, DEFAULT_TASK_TIMEOUT_MS)
-
-      child.on('error', (error) => {
-        clearTimeout(timeout)
-        reject(error)
+    let exitCode
+    try {
+      exitCode = await waitForChildProcess({
+        child,
+        label,
+        timeoutMs: taskTimeoutMs,
       })
-      child.on('close', (code) => {
-        clearTimeout(timeout)
-        resolve(code)
-      })
-    })
+    }
+    catch (error) {
+      const stdout = stdoutChunks.join('')
+      const stderr = stderrChunks.join('')
+      const failure = normalizeTaskFailure(error, label, { stdout, stderr, timeoutMs: taskTimeoutMs })
+      lastError = failure
+      if (trace) {
+        await trace.updateTask(taskTrace, {
+          stdout,
+          stderr,
+          exit_code: null,
+          parse_status: getTaskFailureReason(failure),
+          failure_reason: getTaskFailureReason(failure),
+        })
+        await trace.writeEvent({
+          type: 'provider_failure',
+          phase: traceMeta.phase || 'chair',
+          provider: traceMeta.provider || CHAIR.display,
+          label,
+          attempt,
+          reason: getTaskFailureReason(failure),
+          task_file: taskTrace,
+        })
+      }
+      if (attempt < 2) {
+        continue
+      }
+      throw failure
+    }
 
     const stdout = stdoutChunks.join('')
     const stderr = stderrChunks.join('')
@@ -2051,8 +2548,10 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
       })
     }
     if (exitCode !== 0) {
+      const failure = createTaskFailure('process_error', `${label} failed with exit code ${exitCode}\n${stderr || stdout}`, { exitCode, stdout, stderr })
+      lastError = failure
       if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'process_error' })
+        await trace.updateTask(taskTrace, { parse_status: 'process_error', failure_reason: 'process_error' })
         await trace.writeEvent({
           type: 'provider_failure',
           phase: traceMeta.phase || 'chair',
@@ -2066,13 +2565,15 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
       if (attempt < 2) {
         continue
       }
-      throw new Error(`${label} failed with exit code ${exitCode}\n${stderr || stdout}`)
+      throw failure
     }
 
     const parsed = parseWrapperOutput(stdout)
     if (!parsed.message) {
+      const failure = createTaskFailure('empty_output', `${label} completed without message output`, { stdout, stderr, exitCode })
+      lastError = failure
       if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'empty_output' })
+        await trace.updateTask(taskTrace, { parse_status: 'empty_output', failure_reason: 'empty_output' })
         await trace.writeEvent({
           type: 'provider_failure',
           phase: traceMeta.phase || 'chair',
@@ -2086,7 +2587,7 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
       if (attempt < 2) {
         continue
       }
-      throw new Error(`${label} completed without message output`)
+      throw failure
     }
 
     if (expectJson) {
@@ -2094,8 +2595,10 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
         extractJsonPayload(parsed.message)
       }
       catch (error) {
+        const failure = createTaskFailure('invalid_json', `${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`, { stdout, stderr, lastMessage: parsed.message })
+        lastError = failure
         if (trace) {
-          await trace.updateTask(taskTrace, { parse_status: 'invalid_json' })
+          await trace.updateTask(taskTrace, { parse_status: 'invalid_json', failure_reason: 'invalid_json' })
           await trace.writeEvent({
             type: 'provider_failure',
             phase: traceMeta.phase || 'chair',
@@ -2110,7 +2613,7 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
         if (attempt < 2) {
           continue
         }
-        throw new Error(`${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`)
+        throw failure
       }
     }
 
@@ -2133,7 +2636,7 @@ async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, 
     }
   }
 
-  throw new Error(`${label} exhausted retries`)
+  throw lastError || createTaskFailure('process_error', `${label} exhausted retries`)
 }
 
 async function runSequentially(items, runner) {
@@ -2142,6 +2645,152 @@ async function runSequentially(items, runner) {
     results.push(await runner(item))
   }
   return results
+}
+
+async function runDebateTurnWithRecovery({
+  actor,
+  task,
+  label,
+  wrapperPath,
+  executionWorkdir,
+  tracker,
+  geminiModel,
+  trace,
+  traceId,
+  pairId,
+  phase,
+  template,
+  checkpointDir = '',
+  taskTimeoutMs,
+}) {
+  try {
+    const result = await runWrapperTask({
+      wrapperPath,
+      backend: actor.backend,
+      prompt: task.prompt,
+      workdir: executionWorkdir,
+      label,
+      tracker,
+      actorId: actor.id,
+      geminiModel,
+      trace,
+      traceMeta: {
+        traceId,
+        phase,
+        provider: actor.display,
+        pair: pairId,
+        promptMetrics: task.promptMetrics,
+      },
+      taskTimeoutMs,
+    })
+    return {
+      status: 'success',
+      provider: actor.display,
+      phase,
+      pair: pairId,
+      message: result.message,
+      payload: extractJsonPayload(result.message),
+      failure_reason: '',
+      error_summary: '',
+    }
+  }
+  catch (error) {
+    const failureReason = getTaskFailureReason(error)
+    return {
+      status: failureReason,
+      provider: actor.display,
+      phase,
+      pair: pairId,
+      message: '',
+      payload: null,
+      failure_reason: failureReason,
+      error_summary: formatFailureSummary(error, {
+        phase,
+        provider: actor.display,
+        label,
+        pair: pairId,
+        template,
+        checkpointDir,
+        failureReason,
+        timeoutMs: taskTimeoutMs,
+        promptChars: task.promptMetrics?.originalPromptChars,
+        promptCharsCompacted: task.promptMetrics?.compactedPromptChars,
+      }),
+    }
+  }
+}
+
+async function runPairExchange({
+  pair,
+  dossier,
+  openings,
+  challenge = null,
+  phase,
+  actionLabel,
+  wrapperPath,
+  executionWorkdir,
+  tracker,
+  geminiModel,
+  trace,
+  traceId,
+  checkpointDir = '',
+  taskTimeoutMs,
+}) {
+  const [leftId, rightId] = pair.participants
+  const leftActor = DEBATERS[leftId]
+  const rightActor = DEBATERS[rightId]
+  const turns = [
+    {
+      key: `${leftId}->${rightId}`,
+      actor: leftActor,
+      label: `${leftActor.display} ${actionLabel} ${rightActor.display}`,
+      task: buildRebuttalTask(pair, leftActor, rightActor, dossier, openings, challenge),
+    },
+    {
+      key: `${rightId}->${leftId}`,
+      actor: rightActor,
+      label: `${rightActor.display} ${actionLabel} ${leftActor.display}`,
+      task: buildRebuttalTask(pair, rightActor, leftActor, dossier, openings, challenge),
+    },
+  ]
+
+  const settledTurns = await runSequentially(turns, async (turn) => {
+    const result = await runDebateTurnWithRecovery({
+      actor: turn.actor,
+      task: turn.task,
+      label: turn.label,
+      wrapperPath,
+      executionWorkdir,
+      tracker,
+      geminiModel,
+      trace,
+      traceId,
+      pairId: pair.id,
+      phase,
+      template: dossier.template || 'generic',
+      checkpointDir,
+      taskTimeoutMs,
+    })
+    return { ...turn, result }
+  })
+
+  const exchange = {}
+  const taskStatus = {}
+  for (const turn of settledTurns) {
+    taskStatus[turn.key] = turn.result.status
+    exchange[turn.key] = turn.result.status === 'success'
+      ? turn.result.payload
+      : buildFailedTurnPayload(turn.result)
+  }
+
+  const successCount = settledTurns.filter(turn => turn.result.status === 'success').length
+  return {
+    exchange,
+    taskStatus,
+    degradedPair: successCount < settledTurns.length,
+    pairFailed: successCount === 0,
+    failureReason: buildPairFailureReason(actionLabel.includes('加赛') ? 'addendum' : 'rebuttal', taskStatus),
+  }
 }
 
 function formatFailureSummary(error, context = {}) {
@@ -2164,6 +2813,18 @@ function formatFailureSummary(error, context = {}) {
   if (context.checkpointDir) {
     lines.push(`- Checkpoint: ${context.checkpointDir}`)
   }
+  if (context.failureReason) {
+    lines.push(`- 失败类型: ${context.failureReason}`)
+  }
+  if (context.timeoutMs !== undefined) {
+    lines.push(`- 超时配置: ${formatTimeoutForTrace(context.timeoutMs)}`)
+  }
+  if (context.promptChars !== undefined) {
+    lines.push(`- Prompt chars(raw): ${context.promptChars}`)
+  }
+  if (context.promptCharsCompacted !== undefined) {
+    lines.push(`- Prompt chars(compacted): ${context.promptCharsCompacted}`)
+  }
   lines.push(`- 错误: ${String(error instanceof Error ? error.message : error)}`)
   return lines.join('\n')
 }
@@ -2181,6 +2842,7 @@ async function runResearchWritingPipeline({
   traceId,
   tracker,
   ensureRunNotTimedOut,
+  taskTimeoutMs,
   strategy: existingStrategy = null,
   outline: existingOutline = null,
   composedDraft: existingComposedDraft = null,
@@ -2206,6 +2868,7 @@ async function runResearchWritingPipeline({
         phase: 'research-strategist',
         provider: CHAIR.display,
       },
+      taskTimeoutMs,
     })
     strategy = extractJsonPayload(strategyResult.message)
     if (checkpointDir) {
@@ -2235,6 +2898,7 @@ async function runResearchWritingPipeline({
         phase: 'research-outline',
         provider: CHAIR.display,
       },
+      taskTimeoutMs,
     })
     outline = extractJsonPayload(outlineResult.message)
     if (checkpointDir) {
@@ -2264,6 +2928,7 @@ async function runResearchWritingPipeline({
         phase: 'research-composer',
         provider: CHAIR.display,
       },
+      taskTimeoutMs,
     })
     composedDraft = extractJsonPayload(composeResult.message)
     if (checkpointDir) {
@@ -2293,6 +2958,7 @@ async function runResearchWritingPipeline({
         phase: 'research-reviewer',
         provider: CHAIR.display,
       },
+      taskTimeoutMs,
     })
     review = extractJsonPayload(reviewResult.message)
     if (checkpointDir) {
@@ -2321,6 +2987,7 @@ async function runResearchWritingPipeline({
       phase: 'research-final-synthesis',
       provider: CHAIR.display,
     },
+    taskTimeoutMs,
   })
 
   const finalSummary = extractJsonPayload(finalResult.message)
@@ -2346,6 +3013,7 @@ async function runResearchWritingPipeline({
 
 async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
   const sourceCwd = process.cwd()
+  const runtimeConfig = resolveRuntimeConfig(options)
   const outputPath = resolveOutputPath(sourceCwd, options.topic, options.outputPath)
   const runtimeContext = inspectRuntimeEnvironment({ cwd: sourceCwd })
   const tracker = createStatusTracker(outputPath, runtimeContext.activeDebaterIds)
@@ -2377,6 +3045,8 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
       active_providers: runtimeContext.activeDebaterLabels,
       checkpoint_dir: researchCheckpoint?.checkpointDir || '',
       checkpoint_resume_phase: researchCheckpoint?.resumePhase || '',
+      task_timeout_ms: formatTimeoutForTrace(runtimeConfig.taskTimeoutMs),
+      run_timeout_ms: formatTimeoutForTrace(runtimeConfig.runTimeoutMs),
       started_at: new Date().toISOString(),
     },
   })
@@ -2395,8 +3065,8 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
     const wrapperPath = runtimeContext.commands['codeagent-wrapper'].path
     const runStartedAt = Date.now()
     function ensureRunNotTimedOut(phase) {
-      if (Date.now() - runStartedAt > DEFAULT_RUN_TIMEOUT_MS) {
-        throw new Error(`Run timed out after ${DEFAULT_RUN_TIMEOUT_MS}ms at phase ${phase}`)
+      if (typeof runtimeConfig.runTimeoutMs === 'number' && runtimeConfig.runTimeoutMs > 0 && Date.now() - runStartedAt > runtimeConfig.runTimeoutMs) {
+        throw new Error(`Run timed out after ${runtimeConfig.runTimeoutMs}ms at phase ${phase}`)
       }
     }
 
@@ -2486,6 +3156,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
         phase: 'opening',
         provider: actor.display,
       },
+      taskTimeoutMs: runtimeConfig.taskTimeoutMs,
       }))
 
       openings = {}
@@ -2533,6 +3204,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
               phase: 'research-pair-triage',
               provider: CHAIR.display,
             },
+            taskTimeoutMs: runtimeConfig.taskTimeoutMs,
           })
           const triageScore = extractJsonPayload(triageResult.message)
           pairResults[pair.id] = {
@@ -2540,6 +3212,10 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
             rebuttals: {},
             addendum: null,
             score: triageScore,
+            task_status: { rebuttals: {}, addendum: {} },
+            degraded_pair: false,
+            pair_failed: false,
+            failure_reason: '',
           }
           triagedPairs.push({ pair, score: triageScore })
         }
@@ -2550,67 +3226,55 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           ensureRunNotTimedOut(`research-focus:${pair.id}`)
           tracker.setPhase(`Research focused rebuttal：${pair.id}`)
           tracker.setCurrentPair(pair.id)
-          const [leftId, rightId] = pair.participants
-          const leftActor = DEBATERS[leftId]
-          const rightActor = DEBATERS[rightId]
+          const rebuttalRound = await runPairExchange({
+            pair,
+            dossier,
+            openings,
+            phase: 'research-focused-rebuttal',
+            actionLabel: '反驳',
+            wrapperPath,
+            executionWorkdir,
+            tracker,
+            geminiModel,
+            trace,
+            traceId,
+            checkpointDir: researchCheckpoint?.checkpointDir,
+            taskTimeoutMs: runtimeConfig.taskTimeoutMs,
+          })
 
-          const [leftRebuttalResult, rightRebuttalResult] = await runSequentially([
-            { actor: leftActor, prompt: buildRebuttalTask(pair, leftActor, rightActor, dossier, openings).prompt, label: `${leftActor.display} 反驳 ${rightActor.display}` },
-            { actor: rightActor, prompt: buildRebuttalTask(pair, rightActor, leftActor, dossier, openings).prompt, label: `${rightActor.display} 反驳 ${leftActor.display}` },
-          ], async ({ actor, prompt, label }) => {
-            try {
-              return await runWrapperTask({
+          const rebuttals = rebuttalRound.exchange
+          let addendum = null
+          const taskStatus = {
+            rebuttals: rebuttalRound.taskStatus,
+            addendum: {},
+          }
+          let finalScore = rebuttalRound.pairFailed
+            ? buildSyntheticPairScore(pair, rebuttalRound.failureReason, '初始 rebuttal')
+            : extractJsonPayload((await runChairTask({
                 wrapperPath,
-                backend: actor.backend,
-                prompt,
+                prompt: buildPairScoreTask(pair, dossier, openings, rebuttals).prompt,
                 workdir: executionWorkdir,
-                label,
-                tracker,
-                actorId: actor.id,
+                label: `Chair focused score ${pair.id}`,
                 geminiModel,
                 trace,
                 traceMeta: {
                   traceId,
-                  phase: 'research-focused-rebuttal',
-                  provider: actor.display,
+                  phase: 'research-focused-score',
+                  provider: CHAIR.display,
+                  pair: pair.id,
+                  promptMetrics: buildPairScoreTask(pair, dossier, openings, rebuttals).promptMetrics,
                 },
-              })
-            }
-            catch (error) {
-              throw new Error(formatFailureSummary(error, {
-                phase: 'research-focused-rebuttal',
-                provider: actor.display,
-                label,
-                pair: pair.id,
-                template: dossier.template || 'generic',
-                checkpointDir: researchCheckpoint?.checkpointDir,
-              }))
-            }
-          })
+                taskTimeoutMs: runtimeConfig.taskTimeoutMs,
+              })).message)
 
-          const rebuttals = {
-            [`${leftId}->${rightId}`]: extractJsonPayload(leftRebuttalResult.message),
-            [`${rightId}->${leftId}`]: extractJsonPayload(rightRebuttalResult.message),
+          finalScore = {
+            ...finalScore,
+            degraded_pair: rebuttalRound.degradedPair || Boolean(finalScore.degraded_pair),
+            pair_failed: rebuttalRound.pairFailed || Boolean(finalScore.pair_failed),
+            failure_reason: rebuttalRound.failureReason || finalScore.failure_reason || '',
           }
 
-          const scoreResult = await runChairTask({
-            wrapperPath,
-            prompt: buildPairScoreTask(pair, dossier, openings, rebuttals).prompt,
-            workdir: executionWorkdir,
-            label: `Chair focused score ${pair.id}`,
-            geminiModel,
-            trace,
-            traceMeta: {
-              traceId,
-              phase: 'research-focused-score',
-              provider: CHAIR.display,
-            },
-          })
-          const score = extractJsonPayload(scoreResult.message)
-
-          let addendum = null
-          const finalScore = score
-          if (shouldEscalatePair(score)) {
+          if (!finalScore.pair_failed && shouldEscalatePair(finalScore)) {
             escalatedPairs.push(pair.id)
             tracker.setEscalatedPairs(escalatedPairs)
           }
@@ -2620,6 +3284,10 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
             rebuttals,
             addendum,
             score: finalScore,
+            task_status: taskStatus,
+            degraded_pair: finalScore.degraded_pair,
+            pair_failed: finalScore.pair_failed,
+            failure_reason: finalScore.failure_reason,
           }
         }
 
@@ -2646,66 +3314,55 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           await trace.writeEvent({ type: 'phase_enter', phase: '交叉质询', pair: pair.id, trace_id: traceId })
         }
         tracker.setCurrentPair(pair.id)
-        const [leftId, rightId] = pair.participants
-        const leftActor = DEBATERS[leftId]
-        const rightActor = DEBATERS[rightId]
+        const rebuttalRound = await runPairExchange({
+          pair,
+          dossier,
+          openings,
+          phase: '交叉质询',
+          actionLabel: '反驳',
+          wrapperPath,
+          executionWorkdir,
+          tracker,
+          geminiModel,
+          trace,
+          traceId,
+          taskTimeoutMs: runtimeConfig.taskTimeoutMs,
+        })
 
-        const [leftRebuttalResult, rightRebuttalResult] = await runSequentially([
-          { actor: leftActor, prompt: buildRebuttalTask(pair, leftActor, rightActor, dossier, openings).prompt, label: `${leftActor.display} 反驳 ${rightActor.display}` },
-          { actor: rightActor, prompt: buildRebuttalTask(pair, rightActor, leftActor, dossier, openings).prompt, label: `${rightActor.display} 反驳 ${leftActor.display}` },
-        ], async ({ actor, prompt, label }) => {
-          try {
-            return await runWrapperTask({
+        const rebuttals = rebuttalRound.exchange
+        let addendum = null
+        const taskStatus = {
+          rebuttals: rebuttalRound.taskStatus,
+          addendum: {},
+        }
+
+        let finalScore = rebuttalRound.pairFailed
+          ? buildSyntheticPairScore(pair, rebuttalRound.failureReason, '初始 rebuttal')
+          : extractJsonPayload((await runChairTask({
               wrapperPath,
-              backend: actor.backend,
-              prompt,
+              prompt: buildPairScoreTask(pair, dossier, openings, rebuttals).prompt,
               workdir: executionWorkdir,
-              label,
-              tracker,
-              actorId: actor.id,
+              label: `Chair score ${pair.id}`,
               geminiModel,
               trace,
               traceMeta: {
                 traceId,
-                phase: '交叉质询',
-                provider: actor.display,
+                phase: 'pair-score',
+                provider: CHAIR.display,
+                pair: pair.id,
+                promptMetrics: buildPairScoreTask(pair, dossier, openings, rebuttals).promptMetrics,
               },
-            })
-          }
-          catch (error) {
-            throw new Error(formatFailureSummary(error, {
-              phase: '交叉质询',
-              provider: actor.display,
-              label,
-              pair: pair.id,
-              template: dossier.template || 'generic',
-            }))
-          }
-        })
+              taskTimeoutMs: runtimeConfig.taskTimeoutMs,
+            })).message)
 
-        const rebuttals = {
-          [`${leftId}->${rightId}`]: extractJsonPayload(leftRebuttalResult.message),
-          [`${rightId}->${leftId}`]: extractJsonPayload(rightRebuttalResult.message),
+        finalScore = {
+          ...finalScore,
+          degraded_pair: rebuttalRound.degradedPair || Boolean(finalScore.degraded_pair),
+          pair_failed: rebuttalRound.pairFailed || Boolean(finalScore.pair_failed),
+          failure_reason: rebuttalRound.failureReason || finalScore.failure_reason || '',
         }
 
-        const scoreResult = await runChairTask({
-          wrapperPath,
-          prompt: buildPairScoreTask(pair, dossier, openings, rebuttals).prompt,
-          workdir: executionWorkdir,
-          label: `Chair score ${pair.id}`,
-          geminiModel,
-          trace,
-          traceMeta: {
-            traceId,
-            phase: 'pair-score',
-            provider: CHAIR.display,
-          },
-        })
-        const score = extractJsonPayload(scoreResult.message)
-
-        let addendum = null
-        let finalScore = score
-        if (shouldEscalatePair(score)) {
+        if (!finalScore.pair_failed && shouldEscalatePair(finalScore)) {
           escalatedPairs.push(pair.id)
           tracker.setEscalatedPairs(escalatedPairs)
           tracker.setPhase(`加赛：${pair.id}`)
@@ -2713,59 +3370,59 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
             await trace.writeEvent({ type: 'phase_enter', phase: '加赛', pair: pair.id, trace_id: traceId })
           }
 
-          const chairQuestions = Array.isArray(score.chair_questions) ? score.chair_questions.join('；') : '请只回应最核心冲突'
-          const [leftAddendumResult, rightAddendumResult] = await runSequentially([
-            { actor: leftActor, prompt: buildRebuttalTask(pair, leftActor, rightActor, dossier, openings, chairQuestions).prompt, label: `${leftActor.display} 加赛回应 ${rightActor.display}` },
-            { actor: rightActor, prompt: buildRebuttalTask(pair, rightActor, leftActor, dossier, openings, chairQuestions).prompt, label: `${rightActor.display} 加赛回应 ${leftActor.display}` },
-          ], async ({ actor, prompt, label }) => {
-            try {
-              return await runWrapperTask({
-                wrapperPath,
-                backend: actor.backend,
-                prompt,
-                workdir: executionWorkdir,
-                label,
-                tracker,
-                actorId: actor.id,
-                geminiModel,
-                trace,
-                traceMeta: {
-                  traceId,
-                  phase: '加赛',
-                  provider: actor.display,
-                },
-              })
-            }
-            catch (error) {
-              throw new Error(formatFailureSummary(error, {
-                phase: '加赛',
-                provider: actor.display,
-                label,
-                pair: pair.id,
-                template: dossier.template || 'generic',
-              }))
-            }
-          })
-
-          addendum = {
-            [`${leftId}->${rightId}`]: extractJsonPayload(leftAddendumResult.message),
-            [`${rightId}->${leftId}`]: extractJsonPayload(rightAddendumResult.message),
-          }
-
-          const rescoredResult = await runChairTask({
+          const chairQuestions = Array.isArray(finalScore.chair_questions) ? finalScore.chair_questions.join('；') : '请只回应最核心冲突'
+          const addendumRound = await runPairExchange({
+            pair,
+            dossier,
+            openings,
+            challenge: chairQuestions,
+            phase: '加赛',
+            actionLabel: '加赛回应',
             wrapperPath,
-            prompt: buildPairScoreTask(pair, dossier, openings, rebuttals, addendum).prompt,
-            workdir: executionWorkdir,
-            label: `Chair rescore ${pair.id}`,
+            executionWorkdir,
+            tracker,
             geminiModel,
             trace,
-            traceMeta: {
-              traceId,
-              phase: 'pair-rescore',
-              provider: CHAIR.display,
-            },
+            traceId,
+            taskTimeoutMs: runtimeConfig.taskTimeoutMs,
           })
-          finalScore = extractJsonPayload(rescoredResult.message)
+
+          addendum = addendumRound.exchange
+          taskStatus.addendum = addendumRound.taskStatus
+          const mergedFailureReason = [finalScore.failure_reason, addendumRound.failureReason].filter(Boolean).join(' | ')
+
+          if (addendumRound.pairFailed) {
+            finalScore = {
+              ...finalScore,
+              degraded_pair: true,
+              failure_reason: mergedFailureReason || finalScore.failure_reason || '',
+            }
+          }
+          else {
+            const rescoreTask = buildPairScoreTask(pair, dossier, openings, rebuttals, addendum)
+            const rescoredResult = await runChairTask({
+              wrapperPath,
+              prompt: rescoreTask.prompt,
+              workdir: executionWorkdir,
+              label: `Chair rescore ${pair.id}`,
+              geminiModel,
+              trace,
+              traceMeta: {
+                traceId,
+                phase: 'pair-rescore',
+                provider: CHAIR.display,
+                pair: pair.id,
+                promptMetrics: rescoreTask.promptMetrics,
+              },
+              taskTimeoutMs: runtimeConfig.taskTimeoutMs,
+            })
+            finalScore = {
+              ...extractJsonPayload(rescoredResult.message),
+              degraded_pair: finalScore.degraded_pair || addendumRound.degradedPair,
+              pair_failed: Boolean(finalScore.pair_failed),
+              failure_reason: mergedFailureReason,
+            }
+          }
         }
 
         pairResults[pair.id] = {
@@ -2773,6 +3430,10 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           rebuttals,
           addendum,
           score: finalScore,
+          task_status: taskStatus,
+          degraded_pair: Boolean(finalScore.degraded_pair),
+          pair_failed: Boolean(finalScore.pair_failed),
+          failure_reason: finalScore.failure_reason || '',
         }
       }
     }
@@ -2798,6 +3459,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
         traceId,
         tracker,
         ensureRunNotTimedOut,
+        taskTimeoutMs: runtimeConfig.taskTimeoutMs,
         strategy: restoredResearchState?.strategy || null,
         outline: restoredResearchState?.outline || null,
         composedDraft: restoredResearchState?.composedDraft || null,
@@ -2819,6 +3481,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           phase: 'final-synthesis',
           provider: CHAIR.display,
         },
+        taskTimeoutMs: runtimeConfig.taskTimeoutMs,
       })
       finalSummary = extractJsonPayload(finalResult.message)
     }
@@ -2889,7 +3552,16 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
 }
 
 async function main() {
-  const options = parseCliArgs(process.argv.slice(2))
+  let options
+  try {
+    options = parseCliArgs(process.argv.slice(2))
+  }
+  catch (error) {
+    console.error('\nCCG 课题论证失败')
+    console.error(String(error instanceof Error ? error.message : error))
+    process.exit(1)
+    return
+  }
   if (options.help || !options.topic) {
     printUsage()
     process.exit(options.help ? 0 : 1)

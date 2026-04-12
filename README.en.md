@@ -141,6 +141,8 @@ Main flags:
 - `--template <name>`: `research` or `engineering`
 - `--resume-research`
 - `--fresh-research`
+- `--task-timeout-ms <ms|infinite>`
+- `--run-timeout-ms <ms|infinite>`
 - `--trace`
 - `--output <path>`
 
@@ -148,6 +150,28 @@ Help:
 
 ```bash
 node scripts/run-grant-deliberation.mjs --help
+```
+
+Timeout control example:
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --topic "Deliberate the key scientific questions, engineering bottlenecks, and best technical route" \
+  --material examples/materials/minimal-brief.md \
+  --task-timeout-ms 300000 \
+  --run-timeout-ms 1800000
+```
+
+Explicit infinite wait:
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --topic "Deliberate the key scientific questions, engineering bottlenecks, and best technical route" \
+  --material examples/materials/minimal-brief.md \
+  --task-timeout-ms infinite \
+  --run-timeout-ms infinite
 ```
 
 ## Templates
@@ -186,6 +210,8 @@ Runtime levels:
 - `blocked`: missing `codex` or `codeagent-wrapper`
 
 The CLI reports active providers and provider strategy summary at the end of each run.
+
+The default behavior still uses finite timeouts. Timeouts are disabled only when you explicitly pass `--task-timeout-ms infinite` / `--run-timeout-ms infinite`, or set `CCG_TASK_TIMEOUT_MS=infinite` / `CCG_RUN_TIMEOUT_MS=infinite`.
 
 ## Output
 
@@ -231,6 +257,8 @@ Trace directory:
 - `.omx/trace/`
 
 These artifacts are local continuation/debug data, not part of the final deliverable.
+
+When one side of a rebuttal or addendum times out, exits abnormally, returns empty output, or emits invalid JSON, the runtime now marks that pair as `degraded_pair` and continues whenever possible. If both initial rebuttals fail, the pair is marked `pair_failed`, and the failure reason is preserved in both the final report and the trace.
 
 ## Repo Layout
 

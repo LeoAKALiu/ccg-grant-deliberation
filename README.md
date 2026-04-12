@@ -141,6 +141,8 @@ node scripts/run-grant-deliberation.mjs [options]
 - `--template <name>`：`research` 或 `engineering`
 - `--resume-research`：显式从最近可恢复 checkpoint 续跑
 - `--fresh-research`：忽略已有 checkpoint，从头运行
+- `--task-timeout-ms <ms|infinite>`：单个 provider 子任务超时；`0` 或 `infinite` 表示无限等待
+- `--run-timeout-ms <ms|infinite>`：整场运行超时；`0` 或 `infinite` 表示无限等待
 - `--trace`：写入本地编排 trace
 - `--output <path>`：指定输出路径
 
@@ -148,6 +150,28 @@ node scripts/run-grant-deliberation.mjs [options]
 
 ```bash
 node scripts/run-grant-deliberation.mjs --help
+```
+
+超时控制示例：
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --topic "论证某科技项目申请书的关键科学问题、工程化难点和最优技术路线" \
+  --material examples/materials/minimal-brief.md \
+  --task-timeout-ms 300000 \
+  --run-timeout-ms 1800000
+```
+
+显式允许无限等待：
+
+```bash
+node scripts/run-grant-deliberation.mjs \
+  --template research \
+  --topic "论证某科技项目申请书的关键科学问题、工程化难点和最优技术路线" \
+  --material examples/materials/minimal-brief.md \
+  --task-timeout-ms infinite \
+  --run-timeout-ms infinite
 ```
 
 ## Templates
@@ -186,6 +210,8 @@ node scripts/run-grant-deliberation.mjs --help
 - `blocked`：缺少 `codex` 或 `codeagent-wrapper`
 
 运行结束时会输出实际参与方与 provider strategy summary。
+
+默认行为仍然是有限超时；只有显式传入 `--task-timeout-ms infinite` / `--run-timeout-ms infinite`，或设置 `CCG_TASK_TIMEOUT_MS=infinite` / `CCG_RUN_TIMEOUT_MS=infinite` 时，才会禁用相应超时。
 
 ## Output
 
@@ -231,6 +257,8 @@ trace 目录：
 - `.omx/trace/`
 
 这些文件仅用于本地续跑与排障，不属于最终交付内容。
+
+当某一侧 rebuttal / addendum 超时、空输出或返回非法 JSON 时，当前实现会把该 pair 标记为 `degraded_pair` 并尽量继续完成后续写作与汇总，而不是直接让整场运行挂死；若双方初始 rebuttal 都失败，则该 pair 会记为 `pair_failed`，并在最终报告与 trace 中保留失败原因。
 
 ## Repo Layout
 

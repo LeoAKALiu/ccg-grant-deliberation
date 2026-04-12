@@ -3,9 +3,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  buildCompactResearchDebateDossier,
   buildDossier,
+  buildFailedTurnPayload,
   buildFinalSynthesisTask,
   buildOpeningTask,
+  buildPairFailureReason,
   buildPairScoreTask,
   buildResearchCheckpointRunDir,
   buildResearchComposeTask,
@@ -14,6 +17,8 @@ import {
   buildResearchReviewTask,
   buildResearchStrategyTask,
   buildRoundRobinPairs,
+  buildRebuttalTask,
+  buildSyntheticPairScore,
   determineResearchResumePhase,
   extractJsonPayload,
   getResearchCheckpointFilePath,
@@ -21,8 +26,10 @@ import {
   inferStyleBrief,
   loadResearchCheckpointState,
   parseCliArgs,
+  parseTimeoutOption,
   parseWrapperOutput,
   renderMarkdownReport,
+  resolveRuntimeConfig,
   resolveResearchCheckpointSession,
   resolveOutputPath,
   scoreResearchPairPriority,
@@ -74,6 +81,33 @@ describe('grant deliberation helpers', () => {
     expect(parseCliArgs(['--topic', 't', '--trace']).trace).toBe(true)
     expect(parseCliArgs(['--topic', 't', '--resume-research']).resumeResearch).toBe(true)
     expect(parseCliArgs(['--topic', 't', '--fresh-research']).freshResearch).toBe(true)
+  })
+
+  it('parses timeout options and resolves cli precedence over env defaults', () => {
+    expect(parseTimeoutOption('infinite', '--task-timeout-ms')).toBeNull()
+    expect(parseTimeoutOption('0', '--task-timeout-ms')).toBeNull()
+    expect(parseTimeoutOption('1200', '--task-timeout-ms')).toBe(1200)
+    expect(parseCliArgs(['--topic', 't', '--task-timeout-ms', 'infinite']).taskTimeoutMs).toBeNull()
+    expect(parseCliArgs(['--topic', 't', '--run-timeout-ms', '1500']).runTimeoutMs).toBe(1500)
+
+    expect(resolveRuntimeConfig({
+      taskTimeoutMs: 2400,
+      runTimeoutMs: null,
+    }, {
+      CCG_TASK_TIMEOUT_MS: '999',
+      CCG_RUN_TIMEOUT_MS: '888',
+    })).toEqual({
+      taskTimeoutMs: 2400,
+      runTimeoutMs: null,
+    })
+
+    expect(resolveRuntimeConfig({}, {
+      CCG_TASK_TIMEOUT_MS: 'infinite',
+      CCG_RUN_TIMEOUT_MS: '12000',
+    })).toEqual({
+      taskTimeoutMs: null,
+      runTimeoutMs: 12000,
+    })
   })
 
   it('extracts JSON from fenced output', () => {
@@ -205,6 +239,86 @@ describe('grant deliberation helpers', () => {
     expect(claudeTask.prompt).not.toContain('## 统一 dossier\n完整版')
     expect(claudeTask.prompt).not.toContain('多工种并行作业导致动态冲突频发')
     expect(gptTask.prompt).toContain('## 统一 dossier\n完整版')
+  })
+
+  it('compacts research rebuttal and pair-score prompts while preserving core evidence', () => {
+    const dossier = {
+      topic: 't',
+      language: 'zh-CN',
+      focus: ['a', 'b'],
+      template: 'research',
+      materialWarnings: ['warning'],
+      materials: [
+        { excerpt: '甲'.repeat(800), summary: '甲'.repeat(1200) },
+        { excerpt: '乙'.repeat(800), summary: '乙'.repeat(1200) },
+        { excerpt: '丙'.repeat(800), summary: '丙'.repeat(1200) },
+        { excerpt: '丁'.repeat(800), summary: '丁'.repeat(1200) },
+      ],
+      dossierText: '## 统一 dossier\n' + '完整材料'.repeat(1200),
+    }
+    const openings = {
+      gemini: { stance: '路线A', strongest_attacks: Array.from({ length: 10 }, (_, i) => `attack-${i}`), summary: '甲'.repeat(600) },
+      claude: { stance: '路线B', strongest_attacks: Array.from({ length: 8 }, (_, i) => `challenge-${i}`), summary: '乙'.repeat(600) },
+    }
+
+    const compactDossier = buildCompactResearchDebateDossier(dossier)
+    const rebuttalTask = buildRebuttalTask(
+      { id: 'gemini-vs-claude', participants: ['gemini', 'claude'] },
+      { id: 'gemini', backend: 'gemini', display: 'Gemini', role: 'gemini-debater' },
+      { id: 'claude', backend: 'claude', display: 'Claude', role: 'claude-debater' },
+      dossier,
+      openings,
+    )
+    const pairScoreTask = buildPairScoreTask(
+      { id: 'gemini-vs-claude', participants: ['gemini', 'claude'] },
+      dossier,
+      openings,
+      {
+        'gemini->claude': buildFailedTurnPayload({
+          status: 'timeout',
+          provider: 'Gemini',
+          phase: '交叉质询',
+          pair: 'gemini-vs-claude',
+          failure_reason: 'timeout',
+          error_summary: 'timeout',
+        }),
+      },
+    )
+
+    expect(compactDossier).toContain('## 压缩版 debate dossier')
+    expect(compactDossier).toContain('其余 1 份材料省略')
+    expect(rebuttalTask.prompt).toContain('压缩版')
+    expect(rebuttalTask.prompt).not.toContain('完整材料完整材料完整材料')
+    expect(rebuttalTask.promptMetrics.wasCompacted).toBe(true)
+    expect(rebuttalTask.promptMetrics.compactedPromptChars).toBeLessThan(rebuttalTask.promptMetrics.originalPromptChars)
+    expect(pairScoreTask.prompt).toContain('"degraded_pair": false')
+    expect(pairScoreTask.prompt).toContain('pair_failed')
+    expect(pairScoreTask.prompt).toContain('failure_reason')
+    expect(pairScoreTask.promptMetrics.wasCompacted).toBe(true)
+  })
+
+  it('derives degraded and failed pair reasons deterministically', () => {
+    expect(buildPairFailureReason('rebuttal', {
+      'gemini->claude': 'success',
+      'claude->gemini': 'timeout',
+    })).toBe('partial_rebuttal_failure:timeout')
+
+    expect(buildPairFailureReason('rebuttal', {
+      'gemini->claude': 'timeout',
+      'claude->gemini': 'invalid_json',
+    })).toBe('all_rebuttal_failed:timeout+invalid_json')
+
+    expect(buildSyntheticPairScore(
+      { id: 'gemini-vs-claude' },
+      'all_rebuttal_failed:timeout+invalid_json',
+      '初始 rebuttal',
+    )).toMatchObject({
+      pair: 'gemini-vs-claude',
+      degraded_pair: true,
+      pair_failed: true,
+      failure_reason: 'all_rebuttal_failed:timeout+invalid_json',
+      provisional_winner: 'tie',
+    })
   })
 
   it('builds research strategist/composer/reviewer prompts with internal quality controls', () => {
@@ -378,7 +492,15 @@ describe('grant deliberation helpers', () => {
       template: 'research',
       payload: {
         pairResults: {
-          'gemini-vs-claude': {},
+          'gemini-vs-claude': {
+            degraded_pair: true,
+            pair_failed: false,
+            failure_reason: 'partial_rebuttal_failure:timeout',
+            task_status: {
+              rebuttals: { 'gemini->claude': 'success', 'claude->gemini': 'timeout' },
+              addendum: {},
+            },
+          },
           'gemini-vs-gpt': {},
           'claude-vs-gpt': {},
         },
@@ -430,6 +552,7 @@ describe('grant deliberation helpers', () => {
 
     expect(loaded.resumePhase).toBe('review')
     expect(loaded.restored.escalatedPairs).toEqual(['claude-vs-gpt'])
+    expect(loaded.restored.pairResults['gemini-vs-claude'].failure_reason).toBe('partial_rebuttal_failure:timeout')
     expect(resolved.reused).toBe(true)
     expect(resolved.runId).toBe(newerRun)
     expect(resolved.resumePhase).toBe('review')
@@ -580,7 +703,12 @@ describe('grant deliberation helpers', () => {
         },
       },
       pairResults: {
-        'gemini-vs-claude': { score: { pair: 'gemini-vs-claude', conflict_score: 0.5, unresolved_degree: 0.4, decision_status: 'settled' } },
+        'gemini-vs-claude': {
+          degraded_pair: true,
+          pair_failed: false,
+          failure_reason: 'partial_rebuttal_failure:timeout',
+          score: { pair: 'gemini-vs-claude', conflict_score: 0.5, unresolved_degree: 0.4, decision_status: 'settled' },
+        },
       },
       escalatedPairs: [],
       outputPath: '/tmp/report.md',
@@ -608,6 +736,8 @@ describe('grant deliberation helpers', () => {
     expect(report).toContain('模板：基金/研究类模板')
     expect(report).toContain('### 1. 研究目标')
     expect(report).toContain('用途：定义项目拟解决的核心目标')
+    expect(report).toContain('flags=degraded')
+    expect(report).toContain('failure=partial_rebuttal_failure:timeout')
   })
 
   it('keeps report in generic mode when no template mapping is provided', () => {
