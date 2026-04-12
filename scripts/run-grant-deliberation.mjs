@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { access, appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { inspectRuntimeEnvironment } from './runtime-environment.mjs'
@@ -27,6 +27,8 @@ const REBUTTAL_MAX_ARRAY_ITEMS = 4
 const REBUTTAL_MAX_OBJECT_KEYS = 10
 const REBUTTAL_MAX_MATERIALS = 3
 const REBUTTAL_DOSSIER_SNIPPET_CHARS = 600
+export const RUN_ARTIFACTS_DIR = 'ccg-grant-deliberation-runs'
+export const DEFAULT_REPORT_PREFIX = 'ccg-grant-deliberation'
 export const RESEARCH_CHECKPOINT_FILE_MAP = {
   openings: 'openings.json',
   'pair-results': 'pair-results.json',
@@ -60,7 +62,7 @@ const STYLE_BRIEF_HINTS = [
 const EXECUTION_GUARDRAILS = [
   '执行约束：',
   '- 不要浏览网页，不要打开浏览器，不要调用 web/search/browser 类工具。',
-  '- 不要读取仓库、技能、README、AGENTS.md、.omx 或任何未在本 prompt 中提供的文件。',
+  '- 不要读取仓库、技能、README、AGENTS.md、历史运行留痕目录或任何未在本 prompt 中提供的文件。',
   '- 不要解释你将如何工作，不要描述环境检查过程，不要输出元评论。',
   '- 只基于本 prompt 中给出的 dossier、会审结果和约束完成任务。',
   '- 严格按照给定 JSON schema 返回，不要附加额外说明。',
@@ -98,7 +100,7 @@ const PROVIDER_STRATEGY_SUMMARY = [
   'gemini: direct',
   'claude: direct',
   'codex-debater: direct',
-  'codex-chair: wrapper/direct-hybrid',
+  'codex-chair: direct',
 ]
 
 const ROLE_PROMPTS = {
@@ -156,7 +158,7 @@ Options:
   --fresh-research       忽略已有 research checkpoint，从头重跑
   --task-timeout-ms <n>  单任务超时，毫秒；0 / infinite 表示无限等待
   --run-timeout-ms <n>   整场运行超时，毫秒；0 / infinite 表示无限等待
-  --trace                写入本地 orchestration trace 到 .omx/trace/
+  --trace                写入本地 orchestration trace 到工作目录运行留痕目录
   --output <path>        自定义输出路径
   --help                 显示帮助
 
@@ -181,7 +183,15 @@ export function resolveOutputPath(cwd, topic, outputPath) {
   if (outputPath) {
     return path.resolve(cwd, outputPath)
   }
-  return path.join(cwd, 'reports', 'ccg-grant-deliberation', `${slugifyTopic(topic)}.md`)
+  return path.join(cwd, `${DEFAULT_REPORT_PREFIX}-${slugifyTopic(topic)}.md`)
+}
+
+export function buildRunArtifactsRoot(cwd) {
+  return path.join(cwd, RUN_ARTIFACTS_DIR)
+}
+
+export function buildRunArtifactsDir(cwd, topic, template, runId) {
+  return path.join(buildRunArtifactsRoot(cwd), template || 'generic', slugifyTopic(topic), runId)
 }
 
 export function buildRoundRobinPairs(participants = ['gemini', 'claude', 'gpt']) {
@@ -491,11 +501,69 @@ async function waitForChildProcess({ child, label, timeoutMs, onTimeout }) {
 }
 
 export function buildResearchCheckpointTopicDir(cwd, topic, template = 'research') {
-  return path.join(cwd, '.omx', 'checkpoints', template, slugifyTopic(topic))
+  return path.join(buildRunArtifactsRoot(cwd), template, slugifyTopic(topic))
 }
 
 export function buildResearchCheckpointRunDir(cwd, topic, template, runId) {
   return path.join(buildResearchCheckpointTopicDir(cwd, topic, template), runId)
+}
+
+export function getRunSummaryPath(runDir) {
+  return path.join(runDir, 'summary.md')
+}
+
+function compactSummaryPayload(payload) {
+  return compactPromptValue(payload)
+}
+
+async function appendRunSummary({ runDir, title, bullets = [], payload = null }) {
+  await mkdir(runDir, { recursive: true })
+  const summaryPath = getRunSummaryPath(runDir)
+  const lines = [
+    `## ${title}`,
+    `- Time: ${new Date().toISOString()}`,
+    ...bullets.filter(Boolean).map(item => `- ${item}`),
+  ]
+
+  if (payload !== null && payload !== undefined) {
+    const compacted = compactSummaryPayload(payload)
+    lines.push('', '```json', JSON.stringify(compacted, null, 2), '```')
+  }
+
+  lines.push('', '')
+  await appendFile(summaryPath, `${lines.join('\n')}`, 'utf-8')
+  return summaryPath
+}
+
+function summarizeOpenings(openings = {}) {
+  return Object.entries(openings).map(([provider, payload]) => {
+    const stance = typeof payload?.stance === 'string' ? truncatePromptText(payload.stance, 96) : '已生成 opening'
+    return `${provider}: ${stance}`
+  })
+}
+
+function summarizePairResults(pairResults = {}) {
+  return Object.values(pairResults).map((entry) => {
+    const score = entry?.score || {}
+    return `${entry?.pair?.id || score.pair || 'pair'}: conflict=${score.conflict_score ?? 'n/a'}, unresolved=${score.unresolved_degree ?? 'n/a'}, status=${score.decision_status || 'unknown'}`
+  })
+}
+
+function summarizeFinalSummary(finalSummary = {}) {
+  const bullets = []
+  if (finalSummary.selected_route?.name) {
+    bullets.push(`selected route: ${finalSummary.selected_route.name}`)
+  }
+  if (Array.isArray(finalSummary.key_scientific_questions)) {
+    bullets.push(`key scientific questions: ${finalSummary.key_scientific_questions.length}`)
+  }
+  if (Array.isArray(finalSummary.engineering_bottlenecks)) {
+    bullets.push(`engineering bottlenecks: ${finalSummary.engineering_bottlenecks.length}`)
+  }
+  if (finalSummary.proposal_section_mapping?.template) {
+    bullets.push(`template mapping: ${finalSummary.proposal_section_mapping.template}`)
+  }
+  return bullets
 }
 
 export function getResearchCheckpointFilePath(checkpointDir, phase) {
@@ -1772,16 +1840,6 @@ function buildGeminiDirectArgs(geminiModel = '') {
   return args
 }
 
-function shouldUseDirectCodexForChair(traceMeta = {}) {
-  return [
-    'research-strategist',
-    'research-composer',
-    'research-reviewer',
-    'research-final-synthesis',
-    'final-synthesis',
-  ].includes(traceMeta.phase)
-}
-
 function shouldUseDirectCodexForDebater({ backend, actorId }) {
   return backend === 'codex' && actorId === 'gpt'
 }
@@ -2444,199 +2502,16 @@ async function runWrapperTask({ backend, prompt, workdir, label, tracker, actorI
   throw new Error(`Unsupported debater dispatch: backend=${backend}, actorId=${actorId || 'unknown'}`)
 }
 
-async function runChairTask({ wrapperPath, prompt, workdir, label, geminiModel, expectJson = true, trace, traceMeta = {}, taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS }) {
-  if (shouldUseDirectCodexForChair(traceMeta)) {
-    return runCodexDirectTask({
-      prompt,
-      workdir,
-      label,
-      trace,
-      traceMeta,
-      expectJson,
-      taskTimeoutMs,
-    })
-  }
-  const args = ['--progress', '--backend', CHAIR.backend, '-', workdir]
-  if (CHAIR.backend === 'gemini' && geminiModel) {
-    args.push('--gemini-model', geminiModel)
-  }
-
-  let attempt = 0
-  let lastError = null
-  while (attempt < 2) {
-    attempt += 1
-    const promptToSend = buildTracePrompt(trace, traceMeta, prompt)
-    const taskTrace = trace
-      ? await trace.writeTask(buildTaskTraceRecord({
-          traceMeta,
-          prompt,
-          promptToSend,
-          args,
-          workdir,
-          label,
-          backend: CHAIR.backend,
-          provider: traceMeta?.provider || CHAIR.display,
-          phase: traceMeta?.phase || 'chair',
-          attempt,
-          taskTimeoutMs,
-        }))
-      : ''
-    const child = spawn(wrapperPath, args, {
-      cwd: workdir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
-    })
-
-    const stdoutChunks = []
-    const stderrChunks = []
-
-    child.stdout.on('data', (chunk) => {
-      stdoutChunks.push(String(chunk))
-    })
-
-    child.stderr.on('data', (chunk) => {
-      stderrChunks.push(String(chunk))
-    })
-
-    child.stdin.write(promptToSend)
-    child.stdin.end()
-
-    let exitCode
-    try {
-      exitCode = await waitForChildProcess({
-        child,
-        label,
-        timeoutMs: taskTimeoutMs,
-      })
-    }
-    catch (error) {
-      const stdout = stdoutChunks.join('')
-      const stderr = stderrChunks.join('')
-      const failure = normalizeTaskFailure(error, label, { stdout, stderr, timeoutMs: taskTimeoutMs })
-      lastError = failure
-      if (trace) {
-        await trace.updateTask(taskTrace, {
-          stdout,
-          stderr,
-          exit_code: null,
-          parse_status: getTaskFailureReason(failure),
-          failure_reason: getTaskFailureReason(failure),
-        })
-        await trace.writeEvent({
-          type: 'provider_failure',
-          phase: traceMeta.phase || 'chair',
-          provider: traceMeta.provider || CHAIR.display,
-          label,
-          attempt,
-          reason: getTaskFailureReason(failure),
-          task_file: taskTrace,
-        })
-      }
-      if (attempt < 2) {
-        continue
-      }
-      throw failure
-    }
-
-    const stdout = stdoutChunks.join('')
-    const stderr = stderrChunks.join('')
-    if (trace) {
-      await trace.updateTask(taskTrace, {
-        stdout,
-        stderr,
-        exit_code: exitCode,
-      })
-    }
-    if (exitCode !== 0) {
-      const failure = createTaskFailure('process_error', `${label} failed with exit code ${exitCode}\n${stderr || stdout}`, { exitCode, stdout, stderr })
-      lastError = failure
-      if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'process_error', failure_reason: 'process_error' })
-        await trace.writeEvent({
-          type: 'provider_failure',
-          phase: traceMeta.phase || 'chair',
-          provider: traceMeta.provider || CHAIR.display,
-          label,
-          attempt,
-          reason: 'process_error',
-          task_file: taskTrace,
-        })
-      }
-      if (attempt < 2) {
-        continue
-      }
-      throw failure
-    }
-
-    const parsed = parseWrapperOutput(stdout)
-    if (!parsed.message) {
-      const failure = createTaskFailure('empty_output', `${label} completed without message output`, { stdout, stderr, exitCode })
-      lastError = failure
-      if (trace) {
-        await trace.updateTask(taskTrace, { parse_status: 'empty_output', failure_reason: 'empty_output' })
-        await trace.writeEvent({
-          type: 'provider_failure',
-          phase: traceMeta.phase || 'chair',
-          provider: traceMeta.provider || CHAIR.display,
-          label,
-          attempt,
-          reason: 'empty_output',
-          task_file: taskTrace,
-        })
-      }
-      if (attempt < 2) {
-        continue
-      }
-      throw failure
-    }
-
-    if (expectJson) {
-      try {
-        extractJsonPayload(parsed.message)
-      }
-      catch (error) {
-        const failure = createTaskFailure('invalid_json', `${label} returned invalid JSON\n${String(error instanceof Error ? error.message : error)}`, { stdout, stderr, lastMessage: parsed.message })
-        lastError = failure
-        if (trace) {
-          await trace.updateTask(taskTrace, { parse_status: 'invalid_json', failure_reason: 'invalid_json' })
-          await trace.writeEvent({
-            type: 'provider_failure',
-            phase: traceMeta.phase || 'chair',
-            provider: traceMeta.provider || CHAIR.display,
-            label,
-            attempt,
-            reason: 'invalid_json',
-            task_file: taskTrace,
-            error: String(error instanceof Error ? error.message : error),
-          })
-        }
-        if (attempt < 2) {
-          continue
-        }
-        throw failure
-      }
-    }
-
-    if (trace) {
-      await trace.updateTask(taskTrace, { parse_status: 'ok' })
-      await trace.writeEvent({
-        type: 'provider_success',
-        phase: traceMeta.phase || 'chair',
-        provider: traceMeta.provider || CHAIR.display,
-        label,
-        attempt,
-        task_file: taskTrace,
-      })
-    }
-    return {
-      message: parsed.message,
-      sessionId: parsed.sessionId,
-      stdout,
-      stderr,
-    }
-  }
-
-  throw lastError || createTaskFailure('process_error', `${label} exhausted retries`)
+async function runChairTask({ prompt, workdir, label, expectJson = true, trace, traceMeta = {}, taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS }) {
+  return runCodexDirectTask({
+    prompt,
+    workdir,
+    label,
+    trace,
+    traceMeta,
+    expectJson,
+    taskTimeoutMs,
+  })
 }
 
 async function runSequentially(items, runner) {
@@ -2651,7 +2526,6 @@ async function runDebateTurnWithRecovery({
   actor,
   task,
   label,
-  wrapperPath,
   executionWorkdir,
   tracker,
   geminiModel,
@@ -2665,7 +2539,6 @@ async function runDebateTurnWithRecovery({
 }) {
   try {
     const result = await runWrapperTask({
-      wrapperPath,
       backend: actor.backend,
       prompt: task.prompt,
       workdir: executionWorkdir,
@@ -2727,7 +2600,6 @@ async function runPairExchange({
   challenge = null,
   phase,
   actionLabel,
-  wrapperPath,
   executionWorkdir,
   tracker,
   geminiModel,
@@ -2759,7 +2631,6 @@ async function runPairExchange({
       actor: turn.actor,
       task: turn.task,
       label: turn.label,
-      wrapperPath,
       executionWorkdir,
       tracker,
       geminiModel,
@@ -2835,7 +2706,7 @@ async function runResearchWritingPipeline({
   pairResults,
   escalatedPairs,
   checkpointDir,
-  wrapperPath,
+  runArtifactsDir,
   executionWorkdir,
   geminiModel,
   trace,
@@ -2857,7 +2728,6 @@ async function runResearchWritingPipeline({
     ensureRunNotTimedOut('research-strategist')
     tracker.setPhase('Research strategist')
     const strategyResult = await runChairTask({
-      wrapperPath,
       prompt: buildResearchStrategyTask(dossier, openings, pairResults, escalatedPairs).prompt,
       workdir: executionWorkdir,
       label: 'Research strategy',
@@ -2881,13 +2751,21 @@ async function runResearchWritingPipeline({
         payload: strategy,
       })
     }
+    await appendRunSummary({
+      runDir: runArtifactsDir,
+      title: 'Research strategist',
+      bullets: [
+        `template: ${dossier.template}`,
+        `narrative positioning: ${strategy?.proposal_strategy?.narrative_positioning || 'n/a'}`,
+      ],
+      payload: strategy,
+    })
   }
 
   if (!outline) {
     ensureRunNotTimedOut('research-outline')
     tracker.setPhase('Research outline')
     const outlineResult = await runChairTask({
-      wrapperPath,
       prompt: buildResearchOutlineTask(dossier, openings, pairResults, escalatedPairs, strategy).prompt,
       workdir: executionWorkdir,
       label: 'Research outline',
@@ -2911,13 +2789,21 @@ async function runResearchWritingPipeline({
         payload: outline,
       })
     }
+    await appendRunSummary({
+      runDir: runArtifactsDir,
+      title: 'Research outline',
+      bullets: [
+        `selected route: ${outline?.selected_route?.name || 'n/a'}`,
+        `sections: ${outline?.proposal_section_mapping?.sections?.length || 0}`,
+      ],
+      payload: outline,
+    })
   }
 
   if (!composedDraft) {
     ensureRunNotTimedOut('research-composer')
     tracker.setPhase('Research composer')
     const composeResult = await runChairTask({
-      wrapperPath,
       prompt: buildResearchComposeTask(dossier, strategy, outline).prompt,
       workdir: executionWorkdir,
       label: 'Research composition',
@@ -2941,13 +2827,21 @@ async function runResearchWritingPipeline({
         payload: composedDraft,
       })
     }
+    await appendRunSummary({
+      runDir: runArtifactsDir,
+      title: 'Research composer',
+      bullets: [
+        `paragraph blocks: ${Object.keys(composedDraft?.proposal_ready_paragraphs || {}).length}`,
+        `alignment rows: ${Array.isArray(composedDraft?.claim_evidence_alignment) ? composedDraft.claim_evidence_alignment.length : 0}`,
+      ],
+      payload: composedDraft,
+    })
   }
 
   if (!review) {
     ensureRunNotTimedOut('research-reviewer')
     tracker.setPhase('Research reviewer')
     const reviewResult = await runChairTask({
-      wrapperPath,
       prompt: buildResearchReviewTask(dossier, strategy, composedDraft).prompt,
       workdir: executionWorkdir,
       label: 'Research review',
@@ -2971,12 +2865,17 @@ async function runResearchWritingPipeline({
         payload: review,
       })
     }
+    await appendRunSummary({
+      runDir: runArtifactsDir,
+      title: 'Research reviewer',
+      bullets: Object.entries(review?.review_scores || {}).map(([name, score]) => `${name}: ${score}`),
+      payload: review,
+    })
   }
 
   ensureRunNotTimedOut('research-final-synthesis')
   tracker.setPhase('Research final synthesis')
   const finalResult = await runChairTask({
-    wrapperPath,
     prompt: buildResearchFinalSynthesisTask(dossier, openings, pairResults, escalatedPairs, strategy, outline, composedDraft, review).prompt,
     workdir: executionWorkdir,
     label: 'Research final synthesis',
@@ -3001,6 +2900,12 @@ async function runResearchWritingPipeline({
       payload: finalSummary,
     })
   }
+  await appendRunSummary({
+    runDir: runArtifactsDir,
+    title: 'Research final synthesis',
+    bullets: summarizeFinalSummary(finalSummary),
+    payload: finalSummary,
+  })
 
   return {
     strategy,
@@ -3031,9 +2936,11 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
       providerStrategy: PROVIDER_STRATEGY_SUMMARY,
     })
     : null
+  const runArtifactsDir = researchCheckpoint?.checkpointDir || buildRunArtifactsDir(sourceCwd, options.topic, options.template || 'generic', traceId)
+  await mkdir(runArtifactsDir, { recursive: true })
   const trace = await createTraceRecorder({
     enabled: options.trace,
-    baseDir: path.join(sourceCwd, '.omx', 'trace'),
+    baseDir: path.join(buildRunArtifactsRoot(sourceCwd), 'trace'),
     traceId,
     runMeta: {
       trace_id: traceId,
@@ -3056,13 +2963,12 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
       const nextSteps = runtimeContext.installAdvice.map(item => `- ${item.advice}`).join('\n')
       throw new Error([
         `当前环境无法运行 CCG 课题论证（status=${runtimeContext.status}）。`,
-        '最低运行门槛：codex + codeagent-wrapper',
+        '最低运行门槛：codex',
         `阻塞项：${runtimeContext.missingRequired.join(', ')}`,
         nextSteps,
         '先运行 `node scripts/doctor.mjs` 查看详情。',
       ].join('\n'))
     }
-    const wrapperPath = runtimeContext.commands['codeagent-wrapper'].path
     const runStartedAt = Date.now()
     function ensureRunNotTimedOut(phase) {
       if (typeof runtimeConfig.runTimeoutMs === 'number' && runtimeConfig.runTimeoutMs > 0 && Date.now() - runStartedAt > runtimeConfig.runTimeoutMs) {
@@ -3074,6 +2980,16 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
     if (researchCheckpoint?.resumeRequestedButMissing) {
       console.error('警告：未找到可恢复的 research checkpoint，将按全新运行执行。')
     }
+    await appendRunSummary({
+      runDir: runArtifactsDir,
+      title: 'Run started',
+      bullets: [
+        `topic: ${options.topic}`,
+        `template: ${options.template || 'generic'}`,
+        `run mode: ${runtimeContext.runMode}`,
+        `active providers: ${runtimeContext.activeDebaterLabels.join(', ') || 'none'}`,
+      ],
+    })
     if (trace.enabled) {
       await trace.writeEvent({ type: 'phase_enter', phase: '环境检查完成', trace_id: traceId })
     }
@@ -3085,6 +3001,20 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
       focus: options.focus,
       template: options.template,
       cwd: sourceCwd,
+    })
+    await appendRunSummary({
+      runDir: runArtifactsDir,
+      title: 'Brief',
+      bullets: [
+        `materials: ${dossier.materials.length}`,
+        `template: ${dossier.template || 'generic'}`,
+        `focus: ${(dossier.focus || []).join(', ')}`,
+      ],
+      payload: {
+        topic: dossier.topic,
+        normalizedBrief: dossier.normalizedBrief,
+        materialWarnings: dossier.materialWarnings,
+      },
     })
 
     const geminiModel = process.env.GEMINI_MODEL?.trim() || ''
@@ -3138,11 +3068,18 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
     if (dossier.template === 'research' && restoredResearchState?.openings) {
       tracker.setPhase(`Research checkpoint restored：${researchCheckpoint.resumePhase || 'openings'} (${researchCheckpoint.runId})`)
       console.log(`- Research checkpoint resumed from ${researchCheckpoint.resumePhase || 'openings'}: ${researchCheckpoint.checkpointDir}`)
+      await appendRunSummary({
+        runDir: runArtifactsDir,
+        title: 'Resume',
+        bullets: [
+          `resumed from: ${researchCheckpoint.resumePhase || 'openings'}`,
+          `checkpoint: ${researchCheckpoint.checkpointDir}`,
+        ],
+      })
     }
     else {
       tracker.setPhase('立论轮已启动')
       const openingResults = await runSequentially(activeDebaters, actor => runWrapperTask({
-      wrapperPath,
       backend: actor.backend,
       prompt: buildOpeningTask(actor, dossier).prompt,
       workdir: executionWorkdir,
@@ -3173,6 +3110,12 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           payload: openings,
         })
       }
+      await appendRunSummary({
+        runDir: runArtifactsDir,
+        title: 'Openings',
+        bullets: summarizeOpenings(openings),
+        payload: openings,
+      })
       tracker.setPhase('立论轮已完成')
     }
 
@@ -3183,6 +3126,12 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
       if (restoredResearchState?.pairResults) {
         tracker.setPhase(`Research checkpoint restored：${researchCheckpoint.resumePhase} (${researchCheckpoint.runId})`)
         tracker.setEscalatedPairs(escalatedPairs)
+        await appendRunSummary({
+          runDir: runArtifactsDir,
+          title: 'Resume pair results',
+          bullets: summarizePairResults(pairResults),
+          payload: { escalatedPairs, pairResults },
+        })
       }
       else {
         tracker.setPhase('Research pair triage')
@@ -3193,7 +3142,6 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
         for (const pair of pairs) {
           ensureRunNotTimedOut(`research-triage:${pair.id}`)
           const triageResult = await runChairTask({
-            wrapperPath,
             prompt: buildPairScoreTask(pair, dossier, openings, {}).prompt,
             workdir: executionWorkdir,
             label: `Chair triage ${pair.id}`,
@@ -3232,7 +3180,6 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
             openings,
             phase: 'research-focused-rebuttal',
             actionLabel: '反驳',
-            wrapperPath,
             executionWorkdir,
             tracker,
             geminiModel,
@@ -3251,7 +3198,6 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           let finalScore = rebuttalRound.pairFailed
             ? buildSyntheticPairScore(pair, rebuttalRound.failureReason, '初始 rebuttal')
             : extractJsonPayload((await runChairTask({
-                wrapperPath,
                 prompt: buildPairScoreTask(pair, dossier, openings, rebuttals).prompt,
                 workdir: executionWorkdir,
                 label: `Chair focused score ${pair.id}`,
@@ -3304,6 +3250,12 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
             },
           })
         }
+        await appendRunSummary({
+          runDir: runArtifactsDir,
+          title: 'Research pair results',
+          bullets: summarizePairResults(pairResults),
+          payload: { escalatedPairs, pairResults },
+        })
       }
     }
     else {
@@ -3320,7 +3272,6 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           openings,
           phase: '交叉质询',
           actionLabel: '反驳',
-          wrapperPath,
           executionWorkdir,
           tracker,
           geminiModel,
@@ -3339,7 +3290,6 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
         let finalScore = rebuttalRound.pairFailed
           ? buildSyntheticPairScore(pair, rebuttalRound.failureReason, '初始 rebuttal')
           : extractJsonPayload((await runChairTask({
-              wrapperPath,
               prompt: buildPairScoreTask(pair, dossier, openings, rebuttals).prompt,
               workdir: executionWorkdir,
               label: `Chair score ${pair.id}`,
@@ -3378,7 +3328,6 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
             challenge: chairQuestions,
             phase: '加赛',
             actionLabel: '加赛回应',
-            wrapperPath,
             executionWorkdir,
             tracker,
             geminiModel,
@@ -3401,7 +3350,6 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           else {
             const rescoreTask = buildPairScoreTask(pair, dossier, openings, rebuttals, addendum)
             const rescoredResult = await runChairTask({
-              wrapperPath,
               prompt: rescoreTask.prompt,
               workdir: executionWorkdir,
               label: `Chair rescore ${pair.id}`,
@@ -3436,6 +3384,12 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
           failure_reason: finalScore.failure_reason || '',
         }
       }
+      await appendRunSummary({
+        runDir: runArtifactsDir,
+        title: 'Pair results',
+        bullets: summarizePairResults(pairResults),
+        payload: { escalatedPairs, pairResults },
+      })
     }
 
     tracker.setPhase('会审汇总中')
@@ -3452,7 +3406,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
         pairResults,
         escalatedPairs,
         checkpointDir: researchCheckpoint?.checkpointDir || '',
-        wrapperPath,
+        runArtifactsDir,
         executionWorkdir,
         geminiModel,
         trace,
@@ -3470,7 +3424,6 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
     else {
       ensureRunNotTimedOut('final-synthesis')
       const finalResult = await runChairTask({
-        wrapperPath,
         prompt: buildFinalSynthesisTask(dossier, openings, pairResults, escalatedPairs).prompt,
         workdir: executionWorkdir,
         label: 'Chair final synthesis',
@@ -3497,6 +3450,15 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
 
     await mkdir(path.dirname(outputPath), { recursive: true })
     await writeFile(outputPath, report, 'utf-8')
+    await appendRunSummary({
+      runDir: runArtifactsDir,
+      title: 'Final report',
+      bullets: [
+        `output: ${outputPath}`,
+        ...summarizeFinalSummary(finalSummary),
+      ],
+      payload: { outputPath, finalSummary },
+    })
     tracker.setOutputPath(outputPath)
     tracker.setPhase('会审汇总完成')
     if (trace.enabled) {
@@ -3515,6 +3477,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
       `- 运行级别: ${runtimeContext.runMode}`,
       `- 实际参与方: ${runtimeContext.activeDebaterLabels.join(', ')}`,
       `- Provider strategy: ${PROVIDER_STRATEGY_SUMMARY.join(' | ')}`,
+      `- Run summary: ${getRunSummaryPath(runArtifactsDir)}`,
       ...(researchCheckpoint?.checkpointDir ? [`- Checkpoint: ${researchCheckpoint.checkpointDir}`] : []),
       `- 加赛 Pair: ${escalatedPairs.length > 0 ? escalatedPairs.join(', ') : 'none'}`,
       `- 最优技术路线: ${finalSummary.selected_route?.name || '未明确'}`,
@@ -3530,6 +3493,13 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
     }
   }
   catch (error) {
+    await appendRunSummary({
+      runDir: runArtifactsDir,
+      title: 'Run failure',
+      bullets: [
+        `error: ${String(error instanceof Error ? error.message : error)}`,
+      ],
+    })
     if (trace.enabled) {
       await trace.writeRunMeta({
         completed_at: new Date().toISOString(),

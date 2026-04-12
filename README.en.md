@@ -11,7 +11,7 @@
 
 ## About
 
-`ccg-grant-deliberation` is a Codex plugin repository for technology grant proposals, research funding applications, and project deliberation.
+`ccg-grant-deliberation` is a native Codex plugin repository for technology grant proposals, research funding applications, and project deliberation.
 
 It builds on the multi-model collaboration idea in [ccg-workflow](https://github.com/fengshao1227/ccg-workflow) and narrows it to one goal: run structured multi-model deliberation on a single proposal topic and turn the result into application-ready writing.
 
@@ -115,12 +115,10 @@ node scripts/run-grant-deliberation.mjs \
 Minimum runtime:
 
 - Node.js 18+
-- `codeagent-wrapper`
 - `codex`
 
 Recommended full runtime:
 
-- `codeagent-wrapper`
 - `codex`
 - `gemini`
 - `claude`
@@ -204,10 +202,10 @@ If `--template` is omitted, the tool outputs the generic deliberation report onl
 
 Runtime levels:
 
-- `full`: `codex + codeagent-wrapper + gemini + claude`
-- `partial`: `codex + codeagent-wrapper + (gemini or claude)`
-- `minimal`: `codex + codeagent-wrapper`
-- `blocked`: missing `codex` or `codeagent-wrapper`
+- `full`: `codex + gemini + claude`
+- `partial`: `codex + (gemini or claude)`
+- `minimal`: `codex`
+- `blocked`: missing `codex`
 
 The CLI reports active providers and provider strategy summary at the end of each run.
 
@@ -218,7 +216,7 @@ The default behavior still uses finite timeouts. Timeouts are disabled only when
 Default output path:
 
 ```text
-reports/ccg-grant-deliberation/<topic-slug>.md
+ccg-grant-deliberation-<topic-slug>.md
 ```
 
 A typical report includes:
@@ -243,7 +241,7 @@ Examples:
 
 `research` uses local checkpoint / resume by default:
 
-- directory: `.omx/checkpoints/`
+- directory: `ccg-grant-deliberation-runs/`
 - stage files: `openings / pair-results / strategy / outline / compose / review / final-summary`
 
 For orchestration debugging:
@@ -254,11 +252,11 @@ node scripts/run-grant-deliberation.mjs --trace --template research ...
 
 Trace directory:
 
-- `.omx/trace/`
+- `ccg-grant-deliberation-runs/trace/`
 
-These artifacts are local continuation/debug data, not part of the final deliverable.
+These artifacts are local continuation, stage-history, and debugging data, not part of the final deliverable.
 
-When one side of a rebuttal or addendum times out, exits abnormally, returns empty output, or emits invalid JSON, the runtime now marks that pair as `degraded_pair` and continues whenever possible. If both initial rebuttals fail, the pair is marked `pair_failed`, and the failure reason is preserved in both the final report and the trace.
+Each run also appends a concise `summary.md` inside `ccg-grant-deliberation-runs/` so users can inspect the stage-by-stage history without reading raw JSON.
 
 ## Repo Layout
 

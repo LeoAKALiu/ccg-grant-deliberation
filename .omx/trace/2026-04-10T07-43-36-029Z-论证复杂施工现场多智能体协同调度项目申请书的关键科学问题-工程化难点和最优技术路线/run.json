@@ -1,0 +1,14 @@
+{
+  "trace_id": "2026-04-10T07-43-36-029Z-论证复杂施工现场多智能体协同调度项目申请书的关键科学问题-工程化难点和最优技术路线",
+  "topic": "论证复杂施工现场多智能体协同调度项目申请书的关键科学问题、工程化难点和最优技术路线",
+  "template": "research",
+  "source_cwd": "/Users/leo/Projects/ccg-grant-deliberation",
+  "execution_workdir": "/var/folders/g4/s06gtz5d7svbfvj7s823rn9w0000gn/T/ccg-grant-deliberation-aiX8GE",
+  "runtime_mode": "full",
+  "active_providers": [
+    "Gemini",
+    "Claude",
+    "GPT(codex)"
+  ],
+  "started_at": "2026-04-10T07:43:36.033Z"
+}

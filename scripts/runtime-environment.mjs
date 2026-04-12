@@ -1,5 +1,4 @@
 import { existsSync } from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 
 export const MIN_NODE_MAJOR = 18
@@ -44,19 +43,6 @@ export function searchPathForCommand(commandName) {
   return ''
 }
 
-export function resolveWrapperPath({ configuredPath = process.env.CCG_CODEAGENT_WRAPPER, homeDir = os.homedir(), commandLookup = searchPathForCommand } = {}) {
-  if (configuredPath && existsSync(configuredPath)) {
-    return configuredPath
-  }
-
-  const homeCandidate = path.join(homeDir, '.claude', 'bin', process.platform === 'win32' ? 'codeagent-wrapper.exe' : 'codeagent-wrapper')
-  if (existsSync(homeCandidate)) {
-    return homeCandidate
-  }
-
-  return commandLookup('codeagent-wrapper')
-}
-
 export function getNodeInfo(nodeVersion = process.versions.node) {
   const major = Number.parseInt(String(nodeVersion).split('.')[0], 10) || 0
   return {
@@ -83,8 +69,6 @@ function buildInstallAdvice(key) {
   switch (key) {
     case 'node':
       return `升级 Node.js 到 ${MIN_NODE_MAJOR}+ 后重试。`
-    case 'codeagent-wrapper':
-      return '安装 codeagent-wrapper，或设置 `CCG_CODEAGENT_WRAPPER=/absolute/path/to/codeagent-wrapper`。'
     case 'codex':
       return '安装 Codex CLI，并确保 `codex` 在 PATH 中。'
     case 'gemini':
@@ -100,16 +84,10 @@ export function inspectRuntimeEnvironment({
   cwd = process.cwd(),
   nodeVersion = process.versions.node,
   commandLookup = searchPathForCommand,
-  wrapperPath = undefined,
-  homeDir = os.homedir(),
 } = {}) {
   const node = getNodeInfo(nodeVersion)
-  const resolvedWrapperPath = wrapperPath === undefined
-    ? resolveWrapperPath({ commandLookup, homeDir })
-    : wrapperPath
 
   const commands = {
-    'codeagent-wrapper': buildCommandStatus('codeagent-wrapper', resolvedWrapperPath),
     codex: buildCommandStatus('codex', commandLookup('codex')),
     gemini: buildCommandStatus('gemini', commandLookup('gemini')),
     claude: buildCommandStatus('claude', commandLookup('claude')),
@@ -124,9 +102,6 @@ export function inspectRuntimeEnvironment({
   const missingRequired = []
   if (!node.ok) {
     missingRequired.push('node')
-  }
-  if (!commands['codeagent-wrapper'].available) {
-    missingRequired.push('codeagent-wrapper')
   }
   if (!commands.codex.available) {
     missingRequired.push('codex')
@@ -204,7 +179,6 @@ export function renderDoctorReport(report, { json = false, hook = false } = {}) 
     `Project dependencies: ${report.dependenciesInstalled ? 'installed' : 'not installed'}`,
     '',
     'Commands:',
-    formatCommandLine('codeagent-wrapper', report.commands['codeagent-wrapper']),
     formatCommandLine('codex', report.commands.codex),
     formatCommandLine('gemini', report.commands.gemini),
     formatCommandLine('claude', report.commands.claude),

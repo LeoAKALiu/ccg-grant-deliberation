@@ -1,0 +1,21 @@
+{
+  "trace_id": "2026-04-12T03-52-24-586Z-面向设计参数可信生成的单模态建筑图像可识别性边界与参数桥接方法研究",
+  "topic": "面向设计参数可信生成的单模态建筑图像可识别性边界与参数桥接方法研究",
+  "template": "research",
+  "source_cwd": "/Users/leo/Projects/ccg-grant-deliberation",
+  "execution_workdir": "/var/folders/g4/s06gtz5d7svbfvj7s823rn9w0000gn/T/ccg-grant-deliberation-d1XDfh",
+  "runtime_mode": "full",
+  "active_providers": [
+    "Gemini",
+    "Claude",
+    "GPT(codex)"
+  ],
+  "checkpoint_dir": "/Users/leo/Projects/ccg-grant-deliberation/.omx/checkpoints/research/面向设计参数可信生成的单模态建筑图像可识别性边界与参数桥接方法研究/2026-04-12T03-52-24-586Z-面向设计参数可信生成的单模态建筑图像可识别性边界与参数桥接方法研究",
+  "checkpoint_resume_phase": "",
+  "task_timeout_ms": 30000,
+  "run_timeout_ms": 300000,
+  "started_at": "2026-04-12T03:52:24.587Z",
+  "completed_at": "2026-04-12T03:53:24.609Z",
+  "status": "failure",
+  "error": "Gemini 立论 timed out after 30000ms"
+}

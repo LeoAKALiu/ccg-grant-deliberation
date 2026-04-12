@@ -1,0 +1,18 @@
+{
+  "trace_id": "2026-04-12T03-53-31-888Z-infinite-timeout-smoke",
+  "topic": "infinite-timeout-smoke",
+  "template": "research",
+  "source_cwd": "/Users/leo/Projects/ccg-grant-deliberation",
+  "execution_workdir": "/var/folders/g4/s06gtz5d7svbfvj7s823rn9w0000gn/T/ccg-grant-deliberation-C9HAqe",
+  "runtime_mode": "full",
+  "active_providers": [
+    "Gemini",
+    "Claude",
+    "GPT(codex)"
+  ],
+  "checkpoint_dir": "/Users/leo/Projects/ccg-grant-deliberation/.omx/checkpoints/research/infinite-timeout-smoke/2026-04-12T03-53-31-888Z-infinite-timeout-smoke",
+  "checkpoint_resume_phase": "",
+  "task_timeout_ms": "infinite",
+  "run_timeout_ms": "infinite",
+  "started_at": "2026-04-12T03:53:31.890Z"
+}

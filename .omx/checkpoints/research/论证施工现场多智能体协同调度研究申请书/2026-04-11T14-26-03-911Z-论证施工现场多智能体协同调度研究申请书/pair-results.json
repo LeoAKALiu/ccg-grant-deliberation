@@ -1,0 +1,92 @@
+{
+  "checkpoint_version": 1,
+  "phase": "pair-results",
+  "created_at": "2026-04-11T14:32:05.956Z",
+  "topic": "论证施工现场多智能体协同调度研究申请书",
+  "template": "research",
+  "provider_strategy": [
+    "gemini: direct",
+    "claude: direct",
+    "codex-debater: direct",
+    "codex-chair: wrapper/direct-hybrid"
+  ],
+  "payload": {
+    "pairResults": {
+      "gemini-vs-claude": {
+        "pair": {
+          "id": "gemini-vs-claude",
+          "participants": [
+            "gemini",
+            "claude"
+          ]
+        },
+        "rebuttals": {},
+        "addendum": null,
+        "score": {
+          "pair": "gemini-vs-claude",
+          "conflict_score": 0.19,
+          "unresolved_degree": 0.24,
+          "decision_status": "settled",
+          "key_tensions": [
+            "核心分歧不是方向对立，而是问题定义粒度不同：Gemini将矛盾压缩为“复杂时空约束下的动态博弈与协同调度”，Claude将其拆解为全局收敛、统一约束表达、响应时延上界和经验注入四个可论证子问题。",
+            "Gemini强调‘异构多智能体+动态博弈’，Claude则进一步把‘部分可观测条件下局部一致如何保证全局不发散’明确为首要科学问题，后者更接近基金评审可接受的科学命题表述。",
+            "Gemini的表述偏总纲，Claude已把科学问题与工程瓶颈、技术路线、证据缺口形成闭环，因此当前未决主要来自Gemini信息不足，而非双方真实冲突。"
+          ],
+          "chair_questions": [],
+          "provisional_winner": "claude"
+        }
+      },
+      "gemini-vs-gpt": {
+        "pair": {
+          "id": "gemini-vs-gpt",
+          "participants": [
+            "gemini",
+            "gpt"
+          ]
+        },
+        "rebuttals": {},
+        "addendum": null,
+        "score": {
+          "pair": "gemini-vs-gpt",
+          "conflict_score": 0.68,
+          "unresolved_degree": 0.29,
+          "decision_status": "settled",
+          "key_tensions": [
+            "科学问题主轴之争：是将“复杂时空约束下的异构多智能体动态博弈与协同机制”单独立题，还是将其收编为“最小状态表示—层级边界—安全可验证性”框架中的一部分。",
+            "技术路线边界之争：是保留强多智能体协同叙事，还是明确排除端到端智能涌现路径，转向层级化混合决策与规则护栏。",
+            "资助价值判据之争：是强调前沿协同机制探索，还是把可观测性、可执行性、实时性和系统接口落地性作为先验门槛。"
+          ],
+          "chair_questions": [],
+          "provisional_winner": "gpt"
+        }
+      },
+      "claude-vs-gpt": {
+        "pair": {
+          "id": "claude-vs-gpt",
+          "participants": [
+            "claude",
+            "gpt"
+          ]
+        },
+        "rebuttals": {},
+        "addendum": null,
+        "score": {
+          "pair": "claude-vs-gpt",
+          "conflict_score": 0.67,
+          "unresolved_degree": 0.31,
+          "decision_status": "settled",
+          "key_tensions": [
+            "核心路线定位冲突：Claude主张以“层次化MARL+数字孪生闭环”为主线，GPT主张以“上层优化/启发式+下层轻量学习/局部多智能体+安全护栏”的混合路线为主线。",
+            "科学问题重心冲突：Claude强调去中心化一致性、统一冲突语义和重调度时延上界；GPT强调最小充分状态表示、跨层边界定义、可验证稳定性与局部-全局因果传导。",
+            "工程交付假设冲突：Claude默认可通过CTDE和双层训练逐步解决训练稳定性与协调问题；GPT明确否定将端到端或MARL主导方案作为申报主轴，认为其在真实工地数据、安全验证和部署路径上风险过高。",
+            "系统安全架构冲突：Claude把容错与延迟控制视为需补强的设计项；GPT把“规则护栏+人工接管”上升为路线成立前提，而非附属模块。",
+            "创新性来源冲突：Claude把理论创新押注在去中心化协同收敛；GPT把创新性押注在施工现场跨层决策边界、安全约束执行化和可落地闭环验证框架。"
+          ],
+          "chair_questions": [],
+          "provisional_winner": "gpt"
+        }
+      }
+    },
+    "escalatedPairs": []
+  }
+}

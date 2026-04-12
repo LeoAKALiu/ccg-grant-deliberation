@@ -1,5 +1,5 @@
 node_modules/
-reports/ccg-grant-deliberation/
 .DS_Store
-.omx/
 .omc/
+ccg-grant-deliberation-runs/
+ccg-grant-deliberation-*.md

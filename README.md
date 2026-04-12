@@ -11,7 +11,7 @@
 
 ## About
 
-`ccg-grant-deliberation` 是一个面向科技申请书、基金申报书与项目论证的 Codex 插件仓库。
+`ccg-grant-deliberation` 是一个面向科技申请书、基金申报书与项目论证的 Codex 原生插件仓库。
 
 它基于 [ccg-workflow](https://github.com/fengshao1227/ccg-workflow) 的多模型协同思路，收敛到单一目标：围绕一个申报主题组织多模型会审，并输出可直接进入申请书正文的结构化结果。
 
@@ -115,12 +115,10 @@ node scripts/run-grant-deliberation.mjs \
 最低运行门槛：
 
 - Node.js 18+
-- `codeagent-wrapper`
 - `codex`
 
 完整环境：
 
-- `codeagent-wrapper`
 - `codex`
 - `gemini`
 - `claude`
@@ -204,10 +202,10 @@ node scripts/run-grant-deliberation.mjs \
 
 运行级别：
 
-- `full`：`codex + codeagent-wrapper + gemini + claude`
-- `partial`：`codex + codeagent-wrapper + (gemini 或 claude)`
-- `minimal`：`codex + codeagent-wrapper`
-- `blocked`：缺少 `codex` 或 `codeagent-wrapper`
+- `full`：`codex + gemini + claude`
+- `partial`：`codex + (gemini 或 claude)`
+- `minimal`：`codex`
+- `blocked`：缺少 `codex`
 
 运行结束时会输出实际参与方与 provider strategy summary。
 
@@ -218,7 +216,7 @@ node scripts/run-grant-deliberation.mjs \
 默认输出路径：
 
 ```text
-reports/ccg-grant-deliberation/<topic-slug>.md
+ccg-grant-deliberation-<topic-slug>.md
 ```
 
 主报告通常包含：
@@ -243,7 +241,7 @@ reports/ccg-grant-deliberation/<topic-slug>.md
 
 `research` 模式默认启用本地 checkpoint / resume：
 
-- 目录：`.omx/checkpoints/`
+- 目录：`ccg-grant-deliberation-runs/`
 - 阶段文件：`openings / pair-results / strategy / outline / compose / review / final-summary`
 
 如需调试编排，可显式开启 trace：
@@ -254,11 +252,11 @@ node scripts/run-grant-deliberation.mjs --trace --template research ...
 
 trace 目录：
 
-- `.omx/trace/`
+- `ccg-grant-deliberation-runs/trace/`
 
-这些文件仅用于本地续跑与排障，不属于最终交付内容。
+这些文件仅用于本地续跑、阶段回溯与排障，不属于最终交付内容。
 
-当某一侧 rebuttal / addendum 超时、空输出或返回非法 JSON 时，当前实现会把该 pair 标记为 `degraded_pair` 并尽量继续完成后续写作与汇总，而不是直接让整场运行挂死；若双方初始 rebuttal 都失败，则该 pair 会记为 `pair_failed`，并在最终报告与 trace 中保留失败原因。
+每次运行都会在工作目录的 `ccg-grant-deliberation-runs/` 下追加 `summary.md`，按阶段留下简要 Markdown 留痕，便于 checkpoint、续跑与用户透明化回溯。
 
 ## Repo Layout
 

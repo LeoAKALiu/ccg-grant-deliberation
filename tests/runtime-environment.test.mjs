@@ -20,7 +20,6 @@ describe('runtime environment inspection', () => {
         gemini: '/bin/gemini',
         claude: '/bin/claude',
       }),
-      wrapperPath: '/bin/codeagent-wrapper',
       nodeVersion: '20.11.0',
     })
 
@@ -36,7 +35,6 @@ describe('runtime environment inspection', () => {
         codex: '/bin/codex',
         gemini: '/bin/gemini',
       }),
-      wrapperPath: '/bin/codeagent-wrapper',
       nodeVersion: '20.11.0',
     })
 
@@ -51,7 +49,6 @@ describe('runtime environment inspection', () => {
       commandLookup: makeLookup({
         codex: '/bin/codex',
       }),
-      wrapperPath: '/bin/codeagent-wrapper',
       nodeVersion: '20.11.0',
     })
 
@@ -60,24 +57,15 @@ describe('runtime environment inspection', () => {
     expect(report.activeDebaterIds).toEqual(['gpt'])
   })
 
-  it('reports blocked when codex or wrapper is missing', () => {
+  it('reports blocked when codex is missing', () => {
     const missingCodex = inspectRuntimeEnvironment({
       cwd: process.cwd(),
       commandLookup: makeLookup({ gemini: '/bin/gemini' }),
-      wrapperPath: '/bin/codeagent-wrapper',
-      nodeVersion: '20.11.0',
-    })
-    const missingWrapper = inspectRuntimeEnvironment({
-      cwd: process.cwd(),
-      commandLookup: makeLookup({ codex: '/bin/codex' }),
-      wrapperPath: '',
       nodeVersion: '20.11.0',
     })
 
     expect(missingCodex.status).toBe('blocked')
     expect(missingCodex.missingRequired).toContain('codex')
-    expect(missingWrapper.status).toBe('blocked')
-    expect(missingWrapper.missingRequired).toContain('codeagent-wrapper')
   })
 
   it('renders doctor and setup outputs with actionable next steps', () => {
@@ -86,7 +74,6 @@ describe('runtime environment inspection', () => {
       commandLookup: makeLookup({
         codex: '/bin/codex',
       }),
-      wrapperPath: '/bin/codeagent-wrapper',
       nodeVersion: '20.11.0',
     })
 

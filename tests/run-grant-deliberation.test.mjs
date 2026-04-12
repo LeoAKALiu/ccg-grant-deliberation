@@ -70,7 +70,7 @@ describe('grant deliberation helpers', () => {
 
   it('uses the default report path when none is provided', () => {
     const cwd = '/tmp/demo'
-    expect(resolveOutputPath(cwd, 'Grant Review 2026')).toBe('/tmp/demo/reports/ccg-grant-deliberation/grant-review-2026.md')
+    expect(resolveOutputPath(cwd, 'Grant Review 2026')).toBe('/tmp/demo/ccg-grant-deliberation-grant-review-2026.md')
   })
 
   it('parses template options and keeps default behavior when absent', () => {
@@ -406,7 +406,7 @@ describe('grant deliberation helpers', () => {
       phase: 'openings',
       topic: '复杂施工现场协同调度',
       template: 'research',
-      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: wrapper/direct-hybrid'],
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: direct'],
       payload: { gemini: { stance: 'a' } },
     })
     await writeResearchCheckpoint({
@@ -414,7 +414,7 @@ describe('grant deliberation helpers', () => {
       phase: 'pair-results',
       topic: '复杂施工现场协同调度',
       template: 'research',
-      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: wrapper/direct-hybrid'],
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: direct'],
       payload: { pairResults: { x: {} }, escalatedPairs: ['x'] },
     })
     await writeResearchCheckpoint({
@@ -422,7 +422,7 @@ describe('grant deliberation helpers', () => {
       phase: 'strategy',
       topic: '复杂施工现场协同调度',
       template: 'research',
-      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: wrapper/direct-hybrid'],
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: direct'],
       payload: { proposal_strategy: {} },
     })
     await writeResearchCheckpoint({
@@ -430,7 +430,7 @@ describe('grant deliberation helpers', () => {
       phase: 'outline',
       topic: '复杂施工现场协同调度',
       template: 'research',
-      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: wrapper/direct-hybrid'],
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: direct'],
       payload: { proposal_section_mapping: { sections: [] } },
     })
     await writeResearchCheckpoint({
@@ -438,7 +438,7 @@ describe('grant deliberation helpers', () => {
       phase: 'compose',
       topic: '复杂施工现场协同调度',
       template: 'research',
-      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: wrapper/direct-hybrid'],
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: direct'],
       payload: { proposal_ready_paragraphs: {} },
     })
     await writeResearchCheckpoint({
@@ -446,7 +446,7 @@ describe('grant deliberation helpers', () => {
       phase: 'review',
       topic: '复杂施工现场协同调度',
       template: 'research',
-      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: wrapper/direct-hybrid'],
+      providerStrategy: ['gemini: direct', 'claude: direct', 'codex-debater: direct', 'codex-chair: direct'],
       payload: { review_scores: {} },
     })
 
@@ -718,7 +718,6 @@ describe('grant deliberation helpers', () => {
         activeDebaterLabels: ['Gemini', 'GPT(codex)'],
         missingOptional: ['claude'],
         commands: {
-          'codeagent-wrapper': { available: true },
           codex: { available: true },
           gemini: { available: true },
         },
