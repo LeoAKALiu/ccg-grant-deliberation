@@ -134,6 +134,7 @@ Main flags:
 - `--topic <text>`
 - `--material <path>`
 - `--materials <a,b,c>`
+- `--project-cwd <path>`
 - `--language <lang>`
 - `--focus <a,b,c>`
 - `--template <name>`: `research` or `engineering`
@@ -219,6 +220,13 @@ Default output path:
 ccg-grant-deliberation-<topic-slug>.md
 ```
 
+By default, this is written under the current project directory. The project directory is resolved in this order:
+
+1. `--project-cwd <path>`
+2. `CCG_PROJECT_CWD`
+3. `INIT_CWD`
+4. the current shell working directory
+
 A typical report includes:
 
 - runtime declaration
@@ -241,7 +249,7 @@ Examples:
 
 `research` uses local checkpoint / resume by default:
 
-- directory: `ccg-grant-deliberation-runs/`
+- directory: `ccg-grant-deliberation-runs/` under the current project directory
 - stage files: `openings / pair-results / strategy / outline / compose / review / final-summary`
 
 For orchestration debugging:
@@ -252,11 +260,11 @@ node scripts/run-grant-deliberation.mjs --trace --template research ...
 
 Trace directory:
 
-- `ccg-grant-deliberation-runs/trace/`
+- `ccg-grant-deliberation-runs/trace/` under the current project directory
 
 These artifacts are local continuation, stage-history, and debugging data, not part of the final deliverable.
 
-Each run also appends a concise `summary.md` inside `ccg-grant-deliberation-runs/` so users can inspect the stage-by-stage history without reading raw JSON.
+Each run also appends a concise `summary.md` inside `ccg-grant-deliberation-runs/` under the current project directory, so users can inspect the stage-by-stage history without reading raw JSON.
 
 ## Repo Layout
 

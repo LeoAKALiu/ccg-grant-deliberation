@@ -151,6 +151,7 @@ Options:
   --topic <text>         论证议题
   --material <path>      本地材料路径，可重复传入
   --materials <a,b,c>    逗号分隔的材料路径列表
+  --project-cwd <path>   产物与相对材料路径的项目根目录
   --language <lang>      输出语言，默认 zh-CN
   --focus <a,b,c>        关注维度，默认 key_scientific_questions,engineering_bottlenecks,technical_route
   --template <name>      章节模板：research | engineering
@@ -212,6 +213,7 @@ export function parseCliArgs(argv) {
   const options = {
     topic: '',
     materials: [],
+    projectCwd: '',
     language: DEFAULT_LANGUAGE,
     focus: [...DEFAULT_FOCUS],
     template: '',
@@ -240,6 +242,9 @@ export function parseCliArgs(argv) {
         if (argv[i + 1]) {
           options.materials.push(...argv[++i].split(',').map(item => item.trim()).filter(Boolean))
         }
+        break
+      case '--project-cwd':
+        options.projectCwd = argv[++i] || ''
         break
       case '--language':
         options.language = argv[++i] || DEFAULT_LANGUAGE
@@ -331,6 +336,19 @@ export function resolveRuntimeConfig(options = {}, env = process.env) {
     taskTimeoutMs,
     runTimeoutMs,
   }
+}
+
+export function resolveProjectCwd(projectCwd = '', env = process.env, invocationCwd = process.cwd()) {
+  if (projectCwd) {
+    return path.resolve(invocationCwd, projectCwd)
+  }
+  if (env.CCG_PROJECT_CWD) {
+    return path.resolve(env.CCG_PROJECT_CWD)
+  }
+  if (env.INIT_CWD) {
+    return path.resolve(env.INIT_CWD)
+  }
+  return invocationCwd
 }
 
 function formatTimeoutForTrace(timeoutMs) {
@@ -2916,11 +2934,12 @@ async function runResearchWritingPipeline({
   }
 }
 
-async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
-  const sourceCwd = process.cwd()
+async function runGrantDeliberation(options, executionWorkdir = process.cwd(), env = process.env) {
+  const invocationCwd = process.cwd()
+  const projectCwd = resolveProjectCwd(options.projectCwd, env, invocationCwd)
   const runtimeConfig = resolveRuntimeConfig(options)
-  const outputPath = resolveOutputPath(sourceCwd, options.topic, options.outputPath)
-  const runtimeContext = inspectRuntimeEnvironment({ cwd: sourceCwd })
+  const outputPath = resolveOutputPath(projectCwd, options.topic, options.outputPath)
+  const runtimeContext = inspectRuntimeEnvironment({ cwd: invocationCwd })
   const tracker = createStatusTracker(outputPath, runtimeContext.activeDebaterIds)
   const traceId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${slugifyTopic(options.topic)}`
   const checkpointMode = options.template === 'research'
@@ -2928,7 +2947,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
     : 'fresh'
   const researchCheckpoint = options.template === 'research'
     ? await resolveResearchCheckpointSession({
-      cwd: sourceCwd,
+      cwd: projectCwd,
       topic: options.topic,
       template: 'research',
       runId: traceId,
@@ -2936,17 +2955,18 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
       providerStrategy: PROVIDER_STRATEGY_SUMMARY,
     })
     : null
-  const runArtifactsDir = researchCheckpoint?.checkpointDir || buildRunArtifactsDir(sourceCwd, options.topic, options.template || 'generic', traceId)
+  const runArtifactsDir = researchCheckpoint?.checkpointDir || buildRunArtifactsDir(projectCwd, options.topic, options.template || 'generic', traceId)
   await mkdir(runArtifactsDir, { recursive: true })
   const trace = await createTraceRecorder({
     enabled: options.trace,
-    baseDir: path.join(buildRunArtifactsRoot(sourceCwd), 'trace'),
+    baseDir: path.join(buildRunArtifactsRoot(projectCwd), 'trace'),
     traceId,
     runMeta: {
       trace_id: traceId,
       topic: options.topic,
       template: options.template || 'generic',
-      source_cwd: sourceCwd,
+      project_cwd: projectCwd,
+      invocation_cwd: invocationCwd,
       execution_workdir: executionWorkdir,
       runtime_mode: runtimeContext.runMode,
       active_providers: runtimeContext.activeDebaterLabels,
@@ -3000,7 +3020,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd()) {
       language: options.language,
       focus: options.focus,
       template: options.template,
-      cwd: sourceCwd,
+      cwd: projectCwd,
     })
     await appendRunSummary({
       runDir: runArtifactsDir,

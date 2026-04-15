@@ -134,6 +134,7 @@ node scripts/run-grant-deliberation.mjs [options]
 - `--topic <text>`：申报主题
 - `--material <path>`：材料路径，可重复传入
 - `--materials <a,b,c>`：逗号分隔材料列表
+- `--project-cwd <path>`：指定报告、checkpoint、trace 与相对材料路径所基于的项目目录
 - `--language <lang>`：输出语言，默认 `zh-CN`
 - `--focus <a,b,c>`：聚焦维度
 - `--template <name>`：`research` 或 `engineering`
@@ -219,6 +220,13 @@ node scripts/run-grant-deliberation.mjs \
 ccg-grant-deliberation-<topic-slug>.md
 ```
 
+默认会写到当前项目目录。项目目录按以下优先级解析：
+
+1. `--project-cwd <path>`
+2. `CCG_PROJECT_CWD`
+3. `INIT_CWD`
+4. 当前 shell 工作目录
+
 主报告通常包含：
 
 - 运行环境声明
@@ -241,7 +249,7 @@ ccg-grant-deliberation-<topic-slug>.md
 
 `research` 模式默认启用本地 checkpoint / resume：
 
-- 目录：`ccg-grant-deliberation-runs/`
+- 目录：当前项目目录下的 `ccg-grant-deliberation-runs/`
 - 阶段文件：`openings / pair-results / strategy / outline / compose / review / final-summary`
 
 如需调试编排，可显式开启 trace：
@@ -252,11 +260,11 @@ node scripts/run-grant-deliberation.mjs --trace --template research ...
 
 trace 目录：
 
-- `ccg-grant-deliberation-runs/trace/`
+- 当前项目目录下的 `ccg-grant-deliberation-runs/trace/`
 
 这些文件仅用于本地续跑、阶段回溯与排障，不属于最终交付内容。
 
-每次运行都会在工作目录的 `ccg-grant-deliberation-runs/` 下追加 `summary.md`，按阶段留下简要 Markdown 留痕，便于 checkpoint、续跑与用户透明化回溯。
+每次运行都会在当前项目目录的 `ccg-grant-deliberation-runs/` 下追加 `summary.md`，按阶段留下简要 Markdown 留痕，便于 checkpoint、续跑与用户透明化回溯。
 
 ## Repo Layout
 

@@ -29,6 +29,7 @@ import {
   parseTimeoutOption,
   parseWrapperOutput,
   renderMarkdownReport,
+  resolveProjectCwd,
   resolveRuntimeConfig,
   resolveResearchCheckpointSession,
   resolveOutputPath,
@@ -81,6 +82,7 @@ describe('grant deliberation helpers', () => {
     expect(parseCliArgs(['--topic', 't', '--trace']).trace).toBe(true)
     expect(parseCliArgs(['--topic', 't', '--resume-research']).resumeResearch).toBe(true)
     expect(parseCliArgs(['--topic', 't', '--fresh-research']).freshResearch).toBe(true)
+    expect(parseCliArgs(['--topic', 't', '--project-cwd', '/tmp/project']).projectCwd).toBe('/tmp/project')
   })
 
   it('parses timeout options and resolves cli precedence over env defaults', () => {
@@ -108,6 +110,13 @@ describe('grant deliberation helpers', () => {
       taskTimeoutMs: null,
       runTimeoutMs: 12000,
     })
+  })
+
+  it('resolves project cwd from cli, env, or invocation cwd in that order', () => {
+    expect(resolveProjectCwd('relative/project', {}, '/tmp/invoke')).toBe('/tmp/invoke/relative/project')
+    expect(resolveProjectCwd('', { CCG_PROJECT_CWD: '/tmp/project' }, '/tmp/invoke')).toBe('/tmp/project')
+    expect(resolveProjectCwd('', { INIT_CWD: '/tmp/init' }, '/tmp/invoke')).toBe('/tmp/init')
+    expect(resolveProjectCwd('', {}, '/tmp/invoke')).toBe('/tmp/invoke')
   })
 
   it('extracts JSON from fenced output', () => {
