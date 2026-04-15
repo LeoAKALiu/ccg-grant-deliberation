@@ -286,7 +286,7 @@ npm test
 
 当前发布形态：
 
-- 版本：`v0.3.0`
+- 版本：`v0.3.1`
 - 渠道：GitHub prerelease
 - 发布规则：[CHANGELOG.md](./CHANGELOG.md)
 - 发布流程：[docs/releasing.md](./docs/releasing.md)

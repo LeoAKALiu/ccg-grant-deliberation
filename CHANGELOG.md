@@ -6,6 +6,8 @@ The format is intentionally lightweight and release-oriented for GitHub Releases
 
 ## Unreleased
 
+## v0.3.1
+
 ### Added
 
 - CLI timeout controls: `--task-timeout-ms` and `--run-timeout-ms`, both supporting `infinite`
@@ -15,6 +17,12 @@ The format is intentionally lightweight and release-oriented for GitHub Releases
 - Rebuttal and addendum failures now degrade a single pair instead of hanging or aborting the entire run
 - Research rebuttal / pair-score prompts now use compacted context to reduce provider-side prompt bloat
 - Trace/task failure metadata now records timeout config, prompt sizes, and structured failure reasons
+- Default report output now writes to `ccg-grant-deliberation-*.md` in the working directory unless `--output` is set
+- Run artifacts and trace outputs now write under `ccg-grant-deliberation-runs/` instead of the previous `.omx/` layout
+
+### Notes
+
+- `v0.3.1` focuses on runtime hardening, CI-safe release checks, and operational controls without widening the proposal template surface.
 
 ## v0.3.0
 

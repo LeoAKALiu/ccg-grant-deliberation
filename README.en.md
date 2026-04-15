@@ -286,7 +286,7 @@ npm test
 
 Current release state:
 
-- version: `v0.3.0`
+- version: `v0.3.1`
 - channel: GitHub prerelease
 - release notes: [CHANGELOG.md](./CHANGELOG.md)
 - release process: [docs/releasing.md](./docs/releasing.md)
