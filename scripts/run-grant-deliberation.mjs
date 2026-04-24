@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { access, appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -27,6 +28,8 @@ const REBUTTAL_MAX_ARRAY_ITEMS = 4
 const REBUTTAL_MAX_OBJECT_KEYS = 10
 const REBUTTAL_MAX_MATERIALS = 3
 const REBUTTAL_DOSSIER_SNIPPET_CHARS = 600
+const MAX_EVIDENCE_EXCERPTS_PER_MATERIAL = 6
+const MAX_EVIDENCE_EXCERPT_CHARS = 600
 export const RUN_ARTIFACTS_DIR = 'ccg-grant-deliberation-runs'
 export const DEFAULT_REPORT_PREFIX = 'ccg-grant-deliberation'
 export const RESEARCH_CHECKPOINT_FILE_MAP = {
@@ -59,6 +62,8 @@ const STYLE_BRIEF_HINTS = [
   { pattern: /研究计划|研究方案|project plan|research plan/i, reason: '研究计划材料' },
   { pattern: /格式要求|写作要求|撰写说明|注意事项|format/i, reason: '格式约束材料' },
 ]
+const EVIDENCE_KEYWORD_PATTERN = /目标|问题|创新|路线|指标|风险|指南|要求|验证|数据|成果|objective|problem|innovation|route|metric|risk|guide|requirement|validation|data|deliverable/i
+const UNSUPPORTED_STRONG_PHRASES = ['国际领先', '国内领先', '颠覆性', '突破性', '世界一流', '填补空白']
 const EXECUTION_GUARDRAILS = [
   '执行约束：',
   '- 不要浏览网页，不要打开浏览器，不要调用 web/search/browser 类工具。',
@@ -622,6 +627,10 @@ function isValidResearchCheckpointRecord(record, phase, topic, template) {
   )
 }
 
+function checkpointFingerprintMatches(record, expectedFingerprint = '') {
+  return !expectedFingerprint || record?.dossier_fingerprint === expectedFingerprint
+}
+
 export function determineResearchResumePhase(phaseRecords = {}) {
   for (const phase of RESEARCH_RESUME_PRIORITY) {
     const requiredPhases = RESEARCH_STAGE_REQUIREMENTS[phase] || []
@@ -649,17 +658,26 @@ export function getResearchWritingPendingStages(state = {}) {
   return pending
 }
 
-export async function loadResearchCheckpointState({ cwd, topic, template = 'research', runId }) {
+export async function loadResearchCheckpointState({ cwd, topic, template = 'research', runId, dossierFingerprint = '' }) {
   const checkpointDir = buildResearchCheckpointRunDir(cwd, topic, template, runId)
   const phaseRecords = {}
+  let fingerprintMismatch = false
   for (const phase of Object.keys(RESEARCH_CHECKPOINT_FILE_MAP)) {
     if (phase === 'final-summary') {
       continue
     }
     const record = await readJsonFileIfExists(getResearchCheckpointFilePath(checkpointDir, phase))
     if (isValidResearchCheckpointRecord(record, phase, topic, template)) {
+      if (!checkpointFingerprintMatches(record, dossierFingerprint)) {
+        fingerprintMismatch = true
+        continue
+      }
       phaseRecords[phase] = record
     }
+  }
+
+  if (fingerprintMismatch && Object.keys(phaseRecords).length === 0) {
+    return { skipped: true, reason: 'dossier fingerprint mismatch', runId, checkpointDir }
   }
 
   const resumePhase = determineResearchResumePhase(phaseRecords)
@@ -691,10 +709,12 @@ export async function resolveResearchCheckpointSession({
   runId,
   mode = 'auto',
   providerStrategy = PROVIDER_STRATEGY_SUMMARY,
+  dossierFingerprint = '',
 }) {
   const topicDir = buildResearchCheckpointTopicDir(cwd, topic, template)
   await mkdir(topicDir, { recursive: true })
   let resumeRequestedButMissing = false
+  const skippedCheckpoints = []
 
   if (mode !== 'fresh') {
     const entries = await readdir(topicDir, { withFileTypes: true }).catch(() => [])
@@ -710,7 +730,11 @@ export async function resolveResearchCheckpointSession({
       if (scanned > 20) {
         break
       }
-      const state = await loadResearchCheckpointState({ cwd, topic, template, runId: candidateRunId })
+      const state = await loadResearchCheckpointState({ cwd, topic, template, runId: candidateRunId, dossierFingerprint })
+      if (state?.skipped) {
+        skippedCheckpoints.push({ runId: candidateRunId, reason: state.reason })
+        continue
+      }
       if (state?.resumePhase) {
         return {
           ...state,
@@ -718,6 +742,7 @@ export async function resolveResearchCheckpointSession({
           created: false,
           mode,
           providerStrategy,
+          skippedCheckpoints,
           resumeRequestedButMissing: false,
         }
       }
@@ -747,6 +772,7 @@ export async function resolveResearchCheckpointSession({
     created: true,
     mode,
     providerStrategy,
+    skippedCheckpoints,
     resumeRequestedButMissing,
   }
 }
@@ -757,6 +783,7 @@ export async function writeResearchCheckpoint({
   topic,
   template = 'research',
   providerStrategy = PROVIDER_STRATEGY_SUMMARY,
+  dossierFingerprint = '',
   payload,
 }) {
   const filePath = getResearchCheckpointFilePath(checkpointDir, phase)
@@ -767,6 +794,7 @@ export async function writeResearchCheckpoint({
     topic,
     template,
     provider_strategy: providerStrategy,
+    ...(dossierFingerprint ? { dossier_fingerprint: dossierFingerprint } : {}),
     payload,
   }
   await mkdir(checkpointDir, { recursive: true })
@@ -780,6 +808,46 @@ export function normalizeWhitespace(text) {
     .replace(/\t/g, '  ')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
+}
+
+function hashText(text) {
+  return createHash('sha256').update(String(text || ''), 'utf-8').digest('hex')
+}
+
+function splitEvidenceCandidates(text) {
+  return normalizeWhitespace(text)
+    .split(/\n\s*\n/)
+    .map(item => normalizeWhitespace(item))
+    .filter(Boolean)
+}
+
+export function extractEvidenceExcerpts(text, sourceId) {
+  const candidates = splitEvidenceCandidates(text)
+  const scored = candidates.map((candidate, index) => {
+    const isHeading = /^#{1,6}\s+\S/.test(candidate) || /^第[一二三四五六七八九十\d]+[章节部分]/.test(candidate)
+    const hasKeyword = EVIDENCE_KEYWORD_PATTERN.test(candidate)
+    return {
+      text: truncatePromptText(candidate, MAX_EVIDENCE_EXCERPT_CHARS),
+      score: (isHeading ? 2 : 0) + (hasKeyword ? 3 : 0),
+      index,
+    }
+  })
+
+  const selected = scored
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, MAX_EVIDENCE_EXCERPTS_PER_MATERIAL)
+    .sort((a, b) => a.index - b.index)
+
+  const fallback = selected.length > 0
+    ? selected
+    : scored.slice(0, Math.min(MAX_EVIDENCE_EXCERPTS_PER_MATERIAL, scored.length))
+
+  return fallback.map((item, index) => ({
+    id: `${sourceId}-E${index + 1}`,
+    source_id: sourceId,
+    text: item.text,
+  }))
 }
 
 export function parseWrapperOutput(stdout) {
@@ -875,7 +943,53 @@ export function selectResearchFocusPairs(pairEntries, maxPairs = RESEARCH_MAX_FO
     .slice(0, maxPairs)
 }
 
-export function renderMarkdownReport({ dossier, finalSummary, pairResults, escalatedPairs, outputPath, runtimeContext }) {
+export function validateFinalSummaryQuality(finalSummary = {}, dossier = {}) {
+  const warnings = []
+  if (dossier.template !== 'research') {
+    return { ok: true, warnings }
+  }
+
+  const expectedSections = ['研究目标', '关键科学问题', '研究内容', '创新点', '技术路线', '可行性与风险']
+  const sections = Array.isArray(finalSummary.proposal_section_mapping?.sections)
+    ? finalSummary.proposal_section_mapping.sections
+    : []
+  const sectionTitles = sections.map(section => String(section.title || ''))
+
+  for (const expected of expectedSections) {
+    if (!sectionTitles.some(title => title.includes(expected))) {
+      warnings.push(`research section missing: ${expected}`)
+    }
+  }
+
+  if (!finalSummary.quality_summary) {
+    warnings.push('quality_summary missing')
+  }
+  else {
+    const weakClaims = Array.isArray(finalSummary.quality_summary.weak_claims) ? finalSummary.quality_summary.weak_claims : []
+    const materialGaps = Array.isArray(finalSummary.quality_summary.material_gaps) ? finalSummary.quality_summary.material_gaps : []
+    if (weakClaims.length > 0 && materialGaps.length === 0) {
+      warnings.push('weak claims require material_gaps')
+    }
+  }
+
+  const searchableText = [
+    finalSummary.normalized_brief,
+    ...(Array.isArray(finalSummary.key_scientific_questions) ? finalSummary.key_scientific_questions : []),
+    ...Object.values(finalSummary.proposal_ready_paragraphs || {}),
+    ...sections.map(section => section.content || ''),
+    finalSummary.chair_summary,
+  ].join('\n')
+
+  for (const phrase of UNSUPPORTED_STRONG_PHRASES) {
+    if (searchableText.includes(phrase)) {
+      warnings.push(`unsupported strong phrase: ${phrase}`)
+    }
+  }
+
+  return { ok: warnings.length === 0, warnings }
+}
+
+export function renderMarkdownReport({ dossier, finalSummary, pairResults, escalatedPairs, outputPath, runtimeContext, qualityValidation = null }) {
   const keyQuestions = Array.isArray(finalSummary.key_scientific_questions) ? finalSummary.key_scientific_questions : []
   const engineering = Array.isArray(finalSummary.engineering_bottlenecks) ? finalSummary.engineering_bottlenecks : []
   const routes = Array.isArray(finalSummary.candidate_route_comparison) ? finalSummary.candidate_route_comparison : []
@@ -883,6 +997,7 @@ export function renderMarkdownReport({ dossier, finalSummary, pairResults, escal
   const selectedRoute = finalSummary.selected_route || {}
   const proposalParagraphs = finalSummary.proposal_ready_paragraphs || {}
   const sectionMapping = finalSummary.proposal_section_mapping || null
+  const qualitySummary = finalSummary.quality_summary || null
   const activeDebaters = Array.isArray(runtimeContext?.activeDebaterLabels) ? runtimeContext.activeDebaterLabels : []
   const missingOptional = Array.isArray(runtimeContext?.missingOptional) ? runtimeContext.missingOptional : []
 
@@ -1000,6 +1115,42 @@ export function renderMarkdownReport({ dossier, finalSummary, pairResults, escal
     })
   }
 
+  const qualityWarnings = Array.isArray(qualityValidation?.warnings) ? qualityValidation.warnings : []
+  if (qualitySummary || qualityWarnings.length > 0) {
+    const counts = qualitySummary?.evidence_strength_counts || {}
+    const weakClaims = Array.isArray(qualitySummary?.weak_claims) ? qualitySummary.weak_claims : []
+    const materialGaps = Array.isArray(qualitySummary?.material_gaps) ? qualitySummary.material_gaps : []
+    const recommendedMaterials = Array.isArray(qualitySummary?.recommended_next_materials) ? qualitySummary.recommended_next_materials : []
+
+    lines.push('', '## 质量与补证据摘要')
+    lines.push(`- 证据强度：strong: ${counts.strong ?? 0}；medium: ${counts.medium ?? 0}；weak: ${counts.weak ?? 0}`)
+    lines.push('- 弱证据主张：')
+    if (weakClaims.length === 0) {
+      lines.push('  - 暂无')
+    }
+    else {
+      weakClaims.forEach(item => lines.push(`  - ${item}`))
+    }
+    lines.push('- 材料缺口：')
+    if (materialGaps.length === 0) {
+      lines.push('  - 暂无')
+    }
+    else {
+      materialGaps.forEach(item => lines.push(`  - ${item}`))
+    }
+    lines.push('- 下一轮建议补充材料：')
+    if (recommendedMaterials.length === 0) {
+      lines.push('  - 暂无')
+    }
+    else {
+      recommendedMaterials.forEach(item => lines.push(`  - ${item}`))
+    }
+    if (qualityWarnings.length > 0) {
+      lines.push('- 质量门禁警告：')
+      qualityWarnings.forEach(item => lines.push(`  - ${item}`))
+    }
+  }
+
   lines.push('', '## 会审记录摘要')
   const summarizedPairs = Object.values(pairResults)
   if (summarizedPairs.length === 0) {
@@ -1043,25 +1194,31 @@ async function fileLooksReadable(filePath) {
   }
 }
 
-async function readMaterialSnapshot(filePath) {
+async function readMaterialSnapshot(filePath, sourceId) {
   try {
     const raw = await readFile(filePath, 'utf-8')
     const normalized = normalizeWhitespace(raw)
     return {
+      source_id: sourceId,
       path: filePath,
       status: 'loaded',
       size: normalized.length,
+      content_hash: hashText(normalized),
       excerpt: normalized.slice(0, MATERIAL_SNIPPET_CHARS),
       summary: normalized.slice(0, MAX_MATERIAL_CHARS),
+      evidence_excerpts: extractEvidenceExcerpts(normalized, sourceId),
     }
   }
   catch (error) {
     return {
+      source_id: sourceId,
       path: filePath,
       status: 'unreadable',
       error: String(error),
+      content_hash: '',
       summary: '',
       excerpt: '',
+      evidence_excerpts: [],
     }
   }
 }
@@ -1076,7 +1233,7 @@ export async function buildDossier({ topic, materials, language = DEFAULT_LANGUA
       materialWarnings.push(`材料不存在或不可读：${material}`)
       continue
     }
-    normalizedMaterials.push(await readMaterialSnapshot(absolutePath))
+    normalizedMaterials.push(await readMaterialSnapshot(absolutePath, `M${normalizedMaterials.length + 1}`))
   }
 
   const normalizedBrief = [
@@ -1091,9 +1248,20 @@ export async function buildDossier({ topic, materials, language = DEFAULT_LANGUA
     ? '未提供可读材料，仅基于议题进行论证。'
     : normalizedMaterials.map((item, index) => [
         `### 材料 ${index + 1}`,
+        `- 来源编号：${item.source_id}`,
         `- 路径：${item.path}`,
+        `- 内容指纹：${item.content_hash}`,
         `- 摘要：`,
         item.summary,
+      ].join('\n')).join('\n\n')
+
+  const evidenceSection = normalizedMaterials.length === 0
+    ? '未提供可读材料，暂无可引用证据摘录。'
+    : normalizedMaterials.map(item => [
+        `### ${item.source_id} ${path.basename(item.path)}`,
+        ...(Array.isArray(item.evidence_excerpts) && item.evidence_excerpts.length > 0
+          ? item.evidence_excerpts.map(excerpt => `- ${excerpt.id}: ${excerpt.text}`)
+          : ['- 暂无可提取证据摘录']),
       ].join('\n')).join('\n\n')
 
   const styleBriefContext = inferStyleBrief({
@@ -1117,8 +1285,25 @@ export async function buildDossier({ topic, materials, language = DEFAULT_LANGUA
       '',
       '## 材料摘要',
       materialsSection,
+      '',
+      '## 证据摘录',
+      evidenceSection,
     ].join('\n'),
   }
+}
+
+export function buildDossierFingerprint(dossier = {}) {
+  const materialFingerprints = (dossier.materials || []).map(item => ({
+    source_id: item.source_id || '',
+    path: item.path || '',
+    content_hash: item.content_hash || '',
+  }))
+  return hashText(JSON.stringify({
+    topic: dossier.topic || '',
+    template: dossier.template || '',
+    focus: dossier.focus || [],
+    materials: materialFingerprints,
+  }))
 }
 
 function buildJsonInstruction(schema) {
@@ -1192,6 +1377,14 @@ function buildResearchReviewerRubric() {
     '- 技术路线合理性',
     '- 可行性与风险控制',
     '- 表达与结构质量',
+  ].join('\n')
+}
+
+function buildEvidenceReferenceGuidance() {
+  return [
+    '证据引用约束：',
+    '- 优先引用 dossier 中“证据摘录”的编号，例如 `M1-E2: 现场数据约束`。',
+    '- 若材料不足以支撑强判断，必须降低语气，并在 evidence_gaps、open_gaps 或 material_gaps 中说明。',
   ].join('\n')
 }
 
@@ -1495,6 +1688,7 @@ export function buildResearchStrategyTask(dossier, openings, pairResults, escala
       `加赛 pair：${JSON.stringify(escalatedPairs)}`,
       `style brief 检测：${dossier.styleBriefContext.brief}`,
       buildResearchTemplateWritingGuidance(),
+      buildEvidenceReferenceGuidance(),
       '任务：为 research 模板生成 proposal strategy 与 style brief，用于后续章节写作，不要直接输出最终正文。',
       buildJsonInstruction(schema),
     ].join('\n'),
@@ -1535,9 +1729,10 @@ export function buildResearchComposeTask(dossier, strategyResult, outlineResult)
       `proposal strategy：${JSON.stringify(strategyResult, null, 2)}`,
       `research outline：${JSON.stringify(outlineResult, null, 2)}`,
       buildResearchTemplateWritingGuidance(),
+      buildEvidenceReferenceGuidance(),
       'claim-evidence alignment 约束：',
       '- 每个关键章节必须产出 claim_evidence_alignment 条目。',
-      '- supporting_evidence 优先引用用户材料摘要与 deliberation 共识，证据不足时必须标记 open_gaps。',
+      '- supporting_evidence 优先引用证据摘录编号与 deliberation 共识，格式示例：`M1-E2: 现场数据约束`；证据不足时必须标记 open_gaps。',
       '- 无材料支撑的强判断不要直接写成肯定句。',
       '任务：只根据 strategy brief 与 research outline 扩写最终正文段落，并生成 claim-evidence alignment。不要重复输出路线裁决、章节骨架或证据缺口列表。',
       buildJsonInstruction(schema),
@@ -1584,6 +1779,7 @@ export function buildResearchOutlineTask(dossier, openings, pairResults, escalat
       `加赛 pair：${JSON.stringify(escalatedPairs)}`,
       `proposal strategy：${JSON.stringify(strategyResult, null, 2)}`,
       buildResearchTemplateWritingGuidance(),
+      buildEvidenceReferenceGuidance(),
       '任务：先输出 research 章节骨架与路线裁决，不要展开完整正文段落，不要输出 claim_evidence_alignment。',
       buildJsonInstruction(schema),
     ].join('\n'),
@@ -1623,6 +1819,7 @@ export function buildResearchReviewTask(dossier, strategyResult, composedResult)
       `proposal strategy：${JSON.stringify(strategyResult, null, 2)}`,
       `research draft：${JSON.stringify(composedResult, null, 2)}`,
       buildResearchReviewerRubric(),
+      buildEvidenceReferenceGuidance(),
       'review 规则：',
       '- 若 claim_evidence_alignment 中 evidence_strength=weak，则优先要求降级语气或改写为待验证表述。',
       '- 对明显短板章节必须给出 section_revision_guidance。',
@@ -1657,6 +1854,12 @@ export function buildResearchFinalSynthesisTask(dossier, openings, pairResults, 
       {"title":"章节名","purpose":"该章节用途","content":"可直接写入申报书的内容"}
     ]
   },
+  "quality_summary": {
+    "evidence_strength_counts": {"strong":0,"medium":0,"weak":0},
+    "weak_claims": ["弱证据支撑的主张"],
+    "material_gaps": ["需要补充的材料或证据"],
+    "recommended_next_materials": ["下一轮建议补充材料"]
+  },
   "chair_summary": "主席总结"
 }`
 
@@ -1680,8 +1883,10 @@ export function buildResearchFinalSynthesisTask(dossier, openings, pairResults, 
       `research composer draft：${JSON.stringify(composedResult, null, 2)}`,
       `research reviewer result：${JSON.stringify(reviewResult, null, 2)}`,
       buildResearchTemplateWritingGuidance(),
+      buildEvidenceReferenceGuidance(),
       '任务：吸收 strategy / claim-evidence / reviewer 修订意见，输出最终 research 成稿。',
       '若 Pair 会审结果中存在 degraded_pair / pair_failed / failure_reason，必须把这些不完整环节转写为 evidence_gaps 或 chair_summary 中的风险说明。',
+      '必须输出 quality_summary：汇总 strong/medium/weak 证据数量、弱证据主张、材料缺口和下一轮建议补充材料。',
       '不要在最终 JSON 中展开 claim_evidence_alignment 或 reviewer 评分，只输出对用户可见的最终内容。',
       buildJsonInstruction(schema),
     ].join('\n'),
@@ -2766,6 +2971,7 @@ async function runResearchWritingPipeline({
         topic: dossier.topic,
         template: dossier.template,
         providerStrategy: PROVIDER_STRATEGY_SUMMARY,
+        dossierFingerprint: buildDossierFingerprint(dossier),
         payload: strategy,
       })
     }
@@ -2804,6 +3010,7 @@ async function runResearchWritingPipeline({
         topic: dossier.topic,
         template: dossier.template,
         providerStrategy: PROVIDER_STRATEGY_SUMMARY,
+        dossierFingerprint: buildDossierFingerprint(dossier),
         payload: outline,
       })
     }
@@ -2842,6 +3049,7 @@ async function runResearchWritingPipeline({
         topic: dossier.topic,
         template: dossier.template,
         providerStrategy: PROVIDER_STRATEGY_SUMMARY,
+        dossierFingerprint: buildDossierFingerprint(dossier),
         payload: composedDraft,
       })
     }
@@ -2880,6 +3088,7 @@ async function runResearchWritingPipeline({
         topic: dossier.topic,
         template: dossier.template,
         providerStrategy: PROVIDER_STRATEGY_SUMMARY,
+        dossierFingerprint: buildDossierFingerprint(dossier),
         payload: review,
       })
     }
@@ -2915,6 +3124,7 @@ async function runResearchWritingPipeline({
       topic: dossier.topic,
       template: dossier.template,
       providerStrategy: PROVIDER_STRATEGY_SUMMARY,
+      dossierFingerprint: buildDossierFingerprint(dossier),
       payload: finalSummary,
     })
   }
@@ -2942,6 +3152,15 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
   const runtimeContext = inspectRuntimeEnvironment({ cwd: invocationCwd })
   const tracker = createStatusTracker(outputPath, runtimeContext.activeDebaterIds)
   const traceId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${slugifyTopic(options.topic)}`
+  const dossier = await buildDossier({
+    topic: options.topic,
+    materials: options.materials,
+    language: options.language,
+    focus: options.focus,
+    template: options.template,
+    cwd: projectCwd,
+  })
+  const dossierFingerprint = buildDossierFingerprint(dossier)
   const checkpointMode = options.template === 'research'
     ? (options.freshResearch ? 'fresh' : (options.resumeResearch ? 'resume' : 'auto'))
     : 'fresh'
@@ -2953,6 +3172,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
       runId: traceId,
       mode: checkpointMode,
       providerStrategy: PROVIDER_STRATEGY_SUMMARY,
+      dossierFingerprint,
     })
     : null
   const runArtifactsDir = researchCheckpoint?.checkpointDir || buildRunArtifactsDir(projectCwd, options.topic, options.template || 'generic', traceId)
@@ -2972,6 +3192,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
       active_providers: runtimeContext.activeDebaterLabels,
       checkpoint_dir: researchCheckpoint?.checkpointDir || '',
       checkpoint_resume_phase: researchCheckpoint?.resumePhase || '',
+      dossier_fingerprint: dossierFingerprint,
       task_timeout_ms: formatTimeoutForTrace(runtimeConfig.taskTimeoutMs),
       run_timeout_ms: formatTimeoutForTrace(runtimeConfig.runTimeoutMs),
       started_at: new Date().toISOString(),
@@ -3000,6 +3221,9 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
     if (researchCheckpoint?.resumeRequestedButMissing) {
       console.error('警告：未找到可恢复的 research checkpoint，将按全新运行执行。')
     }
+    if (researchCheckpoint?.skippedCheckpoints?.length > 0) {
+      console.error(`警告：已跳过 ${researchCheckpoint.skippedCheckpoints.length} 个不匹配的 research checkpoint。`)
+    }
     await appendRunSummary({
       runDir: runArtifactsDir,
       title: 'Run started',
@@ -3008,20 +3232,13 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
         `template: ${options.template || 'generic'}`,
         `run mode: ${runtimeContext.runMode}`,
         `active providers: ${runtimeContext.activeDebaterLabels.join(', ') || 'none'}`,
+        ...(researchCheckpoint?.skippedCheckpoints || []).map(item => `checkpoint skipped: ${item.reason} (${item.runId})`),
       ],
     })
     if (trace.enabled) {
       await trace.writeEvent({ type: 'phase_enter', phase: '环境检查完成', trace_id: traceId })
     }
     tracker.setPhase('Brief 构建中')
-    const dossier = await buildDossier({
-      topic: options.topic,
-      materials: options.materials,
-      language: options.language,
-      focus: options.focus,
-      template: options.template,
-      cwd: projectCwd,
-    })
     await appendRunSummary({
       runDir: runArtifactsDir,
       title: 'Brief',
@@ -3029,11 +3246,13 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
         `materials: ${dossier.materials.length}`,
         `template: ${dossier.template || 'generic'}`,
         `focus: ${(dossier.focus || []).join(', ')}`,
+        `dossier fingerprint: ${dossierFingerprint}`,
       ],
       payload: {
         topic: dossier.topic,
         normalizedBrief: dossier.normalizedBrief,
         materialWarnings: dossier.materialWarnings,
+        dossierFingerprint,
       },
     })
 
@@ -3127,6 +3346,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
           topic: dossier.topic,
           template: dossier.template,
           providerStrategy: PROVIDER_STRATEGY_SUMMARY,
+          dossierFingerprint,
           payload: openings,
         })
       }
@@ -3264,6 +3484,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
             topic: dossier.topic,
             template: dossier.template,
             providerStrategy: PROVIDER_STRATEGY_SUMMARY,
+            dossierFingerprint,
             payload: {
               pairResults,
               escalatedPairs,
@@ -3459,6 +3680,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
       finalSummary = extractJsonPayload(finalResult.message)
     }
 
+    const qualityValidation = validateFinalSummaryQuality(finalSummary, dossier)
     const report = renderMarkdownReport({
       dossier,
       finalSummary,
@@ -3466,6 +3688,7 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
       escalatedPairs,
       outputPath,
       runtimeContext,
+      qualityValidation,
     })
 
     await mkdir(path.dirname(outputPath), { recursive: true })
@@ -3476,8 +3699,9 @@ async function runGrantDeliberation(options, executionWorkdir = process.cwd(), e
       bullets: [
         `output: ${outputPath}`,
         ...summarizeFinalSummary(finalSummary),
+        ...(qualityValidation.warnings.length > 0 ? qualityValidation.warnings.map(item => `quality warning: ${item}`) : ['quality warnings: none']),
       ],
-      payload: { outputPath, finalSummary },
+      payload: { outputPath, finalSummary, qualityValidation },
     })
     tracker.setOutputPath(outputPath)
     tracker.setPhase('会审汇总完成')
