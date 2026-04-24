@@ -238,6 +238,7 @@ ccg-grant-deliberation-<topic-slug>.md
 - 证据缺口
 - 可直接写入正文的段落
 - 申报书章节映射（模板模式）
+- 质量与补证据摘要（research 模式）
 
 示例：
 
@@ -251,6 +252,7 @@ ccg-grant-deliberation-<topic-slug>.md
 
 - 目录：当前项目目录下的 `ccg-grant-deliberation-runs/`
 - 阶段文件：`openings / pair-results / strategy / outline / compose / review / final-summary`
+- checkpoint 会记录 dossier fingerprint；当议题、模板、聚焦维度或材料内容变化时，会自动跳过不匹配的旧 checkpoint。
 
 如需调试编排，可显式开启 trace：
 

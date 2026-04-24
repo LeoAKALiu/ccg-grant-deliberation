@@ -19,6 +19,7 @@ import {
   buildRoundRobinPairs,
   buildRebuttalTask,
   buildSyntheticPairScore,
+  buildDossierFingerprint,
   determineResearchResumePhase,
   extractJsonPayload,
   getResearchCheckpointFilePath,
@@ -37,6 +38,7 @@ import {
   selectResearchFocusPairs,
   shouldEscalatePair,
   slugifyTopic,
+  validateFinalSummaryQuality,
   writeResearchCheckpoint,
 } from '../scripts/run-grant-deliberation.mjs'
 
@@ -173,6 +175,39 @@ describe('grant deliberation helpers', () => {
     expect(dossier.normalizedBrief).toContain('章节模板：research')
     expect(dossier.researchEnhancementEnabled).toBe(true)
     expect(dossier.styleBriefContext.detected).toBe(false)
+  })
+
+  it('turns materials into stable evidence sources with content hashes and excerpts', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-grant-evidence-'))
+    tmpDirs.push(tmpDir)
+    const fileA = path.join(tmpDir, 'guide.md')
+    await writeFile(fileA, [
+      '# 申报指南',
+      '',
+      '项目目标应聚焦复杂施工现场动态调度问题。',
+      '',
+      '技术路线需要说明验证指标、风险控制和阶段成果。',
+    ].join('\n'), 'utf-8')
+
+    const dossier = await buildDossier({
+      topic: '复杂施工现场协同调度',
+      materials: [fileA],
+      template: 'research',
+      cwd: tmpDir,
+    })
+
+    expect(dossier.materials[0]).toMatchObject({
+      source_id: 'M1',
+      content_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })
+    expect(dossier.materials[0].evidence_excerpts[0]).toMatchObject({
+      id: 'M1-E1',
+      source_id: 'M1',
+    })
+    expect(dossier.materials[0].evidence_excerpts.map(item => item.text).join('\n')).toContain('技术路线需要说明验证指标')
+    expect(dossier.dossierText).toContain('## 证据摘录')
+    expect(dossier.dossierText).toContain('M1-E')
+    expect(buildDossierFingerprint(dossier)).toMatch(/^[a-f0-9]{64}$/)
   })
 
   it('infers a style brief from guide-like research materials', () => {
@@ -377,10 +412,13 @@ describe('grant deliberation helpers', () => {
     expect(composeTask.prompt).toContain('阶段：research composer')
     expect(composeTask.prompt).toContain('claim-evidence alignment 约束')
     expect(composeTask.prompt).toContain('supporting_evidence')
+    expect(composeTask.prompt).toContain('M1-E2: 现场数据约束')
     expect(reviewTask.prompt).toContain('阶段：research reviewer')
     expect(reviewTask.prompt).toContain('grant reviewer 评分维度')
     expect(reviewTask.prompt).toContain('立项必要性')
     expect(finalTask.prompt).toContain('阶段：research final synthesis')
+    expect(finalTask.prompt).toContain('quality_summary')
+    expect(finalTask.prompt).toContain('recommended_next_materials')
     expect(finalTask.prompt).toContain('执行约束：')
     expect(finalTask.prompt).toContain('不要在最终 JSON 中展开 claim_evidence_alignment 或 reviewer 评分')
   })
@@ -567,6 +605,37 @@ describe('grant deliberation helpers', () => {
     expect(resolved.resumePhase).toBe('review')
   })
 
+  it('skips resumable research checkpoints when dossier fingerprints differ', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-research-fingerprint-'))
+    tmpDirs.push(tmpDir)
+    const topic = '复杂施工现场协同调度'
+    const runId = '2026-04-11T10-00-00-000Z-run'
+    const checkpointDir = buildResearchCheckpointRunDir(tmpDir, topic, 'research', runId)
+
+    await writeResearchCheckpoint({
+      checkpointDir,
+      phase: 'openings',
+      topic,
+      template: 'research',
+      dossierFingerprint: 'old-fingerprint',
+      payload: { gemini: { stance: 'old' }, claude: { stance: 'old' }, gpt: { stance: 'old' } },
+    })
+
+    const resolved = await resolveResearchCheckpointSession({
+      cwd: tmpDir,
+      topic,
+      template: 'research',
+      runId: 'new-run',
+      mode: 'auto',
+      dossierFingerprint: 'new-fingerprint',
+    })
+
+    expect(resolved.reused).toBe(false)
+    expect(resolved.skippedCheckpoints).toEqual([
+      { runId, reason: 'dossier fingerprint mismatch' },
+    ])
+  })
+
   it('skips corrupt checkpoint JSON and falls back to the next valid run', async () => {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'ccg-research-corrupt-'))
     tmpDirs.push(tmpDir)
@@ -710,6 +779,12 @@ describe('grant deliberation helpers', () => {
             },
           ],
         },
+        quality_summary: {
+          evidence_strength_counts: { strong: 1, medium: 2, weak: 1 },
+          weak_claims: ['跨工种泛化能力仍缺少实证'],
+          material_gaps: ['补充目标现场数据可得性说明'],
+          recommended_next_materials: ['现场数据清单', '阶段性验证指标'],
+        },
       },
       pairResults: {
         'gemini-vs-claude': {
@@ -744,8 +819,74 @@ describe('grant deliberation helpers', () => {
     expect(report).toContain('模板：基金/研究类模板')
     expect(report).toContain('### 1. 研究目标')
     expect(report).toContain('用途：定义项目拟解决的核心目标')
+    expect(report).toContain('## 质量与补证据摘要')
+    expect(report).toContain('strong: 1')
+    expect(report).toContain('跨工种泛化能力仍缺少实证')
+    expect(report).toContain('现场数据清单')
     expect(report).toContain('flags=degraded')
     expect(report).toContain('failure=partial_rebuttal_failure:timeout')
+  })
+
+  it('validates research final summary quality deterministically', () => {
+    const result = validateFinalSummaryQuality({
+      proposal_section_mapping: {
+        template: 'research',
+        sections: [
+          { title: '研究目标', content: '目标段落' },
+          { title: '关键科学问题', content: '问题段落' },
+        ],
+      },
+      proposal_ready_paragraphs: {
+        scientific_questions: '本项目将形成国际领先的关键科学问题表述。',
+      },
+      quality_summary: {
+        evidence_strength_counts: { strong: 0, medium: 1, weak: 1 },
+        weak_claims: ['科学问题证据不足'],
+        material_gaps: [],
+        recommended_next_materials: [],
+      },
+    }, { template: 'research' })
+
+    expect(result.ok).toBe(false)
+    expect(result.warnings).toContain('research section missing: 研究内容')
+    expect(result.warnings).toContain('weak claims require material_gaps')
+    expect(result.warnings).toContain('unsupported strong phrase: 国际领先')
+  })
+
+  it('renders quality gate warnings even when quality summary is missing', () => {
+    const report = renderMarkdownReport({
+      dossier: {
+        topic: '复杂施工现场协同调度',
+        normalizedBrief: 'brief',
+        materialWarnings: [],
+      },
+      finalSummary: {
+        normalized_brief: 'brief',
+        key_scientific_questions: [],
+        engineering_bottlenecks: [],
+        candidate_route_comparison: [],
+        selected_route: {},
+        evidence_gaps: [],
+        proposal_ready_paragraphs: {},
+      },
+      pairResults: {},
+      escalatedPairs: [],
+      outputPath: '/tmp/report.md',
+      runtimeContext: {
+        status: 'ready',
+        runMode: 'full',
+        activeDebaterLabels: ['Gemini', 'Claude', 'GPT(codex)'],
+        missingOptional: [],
+        commands: {},
+      },
+      qualityValidation: {
+        ok: false,
+        warnings: ['quality_summary missing'],
+      },
+    })
+
+    expect(report).toContain('## 质量与补证据摘要')
+    expect(report).toContain('quality_summary missing')
   })
 
   it('keeps report in generic mode when no template mapping is provided', () => {

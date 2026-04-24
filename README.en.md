@@ -238,6 +238,7 @@ A typical report includes:
 - evidence gaps
 - ready-to-use proposal paragraphs
 - template-based section mapping
+- quality and evidence-gap summary in `research` mode
 
 Examples:
 
@@ -251,6 +252,7 @@ Examples:
 
 - directory: `ccg-grant-deliberation-runs/` under the current project directory
 - stage files: `openings / pair-results / strategy / outline / compose / review / final-summary`
+- checkpoints record a dossier fingerprint; when the topic, template, focus, or material contents change, mismatched old checkpoints are skipped automatically.
 
 For orchestration debugging:
 
